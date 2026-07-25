@@ -45,8 +45,9 @@ release:
   draft: false
   prerelease: auto
 
-brews:
+homebrew_casks:
   - name: snowball
+    binaries: [snowball]
     repository:
       owner: codcod
       name: homebrew-taps
@@ -54,6 +55,13 @@ brews:
     homepage: "https://github.com/codcod/snowball"
     description: "Render AsciiDoc books to PDF/EPUB via the native asciidoctor toolchain"
     dependencies:
-      - name: ruby
-      - name: node
+      - formula: ruby
+      - formula: node
+    # Strip macOS quarantine so the unsigned binary runs without a Gatekeeper prompt.
+    hooks:
+      post:
+        install: |
+          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/snowball"]
+          end
     caveats: "Run `snowball setup` once to install the pinned gems, mermaid-cli, and Chrome."
