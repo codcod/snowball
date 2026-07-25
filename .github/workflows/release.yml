@@ -27,7 +27,4 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # HOMEBREW_TAP_TOKEN: a PAT with write access to the tap repo — only
-          # needed once the `brews:` block in .goreleaser.yaml is enabled
-          # (open item 1: which tap). Until then the release is binaries only.
-          # HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}

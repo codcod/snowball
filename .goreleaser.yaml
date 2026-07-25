@@ -45,21 +45,15 @@ release:
   draft: false
   prerelease: auto
 
-# Homebrew tap publishing — enable once the tap repo is decided (PLAN.md open item 1).
-# Requires HOMEBREW_TAP_TOKEN (PAT with write access to the tap repo) in the release
-# workflow env. snowball is a native ORCHESTRATOR: it still needs ruby/node/chrome at
-# runtime, so declare those as formula dependencies here (and document `snowball setup`
-# for the gem/mermaid layer).
-#
-# brews:
-#   - name: snowball
-#     repository:
-#       owner: codcod
-#       name: homebrew-taps
-#       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-#     homepage: "https://github.com/codcod/snowball"
-#     description: "Render AsciiDoc books to PDF/EPUB via the native asciidoctor toolchain"
-#     dependencies:
-#       - name: ruby
-#       - name: node
-#     caveats: "Run `snowball setup` once to install the pinned gems, mermaid-cli, and Chrome."
+brews:
+  - name: snowball
+    repository:
+      owner: codcod
+      name: homebrew-taps
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: "https://github.com/codcod/snowball"
+    description: "Render AsciiDoc books to PDF/EPUB via the native asciidoctor toolchain"
+    dependencies:
+      - name: ruby
+      - name: node
+    caveats: "Run `snowball setup` once to install the pinned gems, mermaid-cli, and Chrome."
