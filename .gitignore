@@ -1,0 +1,10 @@
+# Build output
+/snowball
+
+# Rendered docs (never commit generated artifacts)
+*.pdf
+*.epub
+
+# Go
+*.test
+*.out
