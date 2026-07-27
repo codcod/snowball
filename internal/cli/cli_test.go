@@ -211,7 +211,7 @@ func TestBuildCommandFlags(t *testing.T) {
 
 func TestRootPersistentFlags(t *testing.T) {
 	root, g := newRoot("v0.0.0")
-	for name, short := range map[string]string{"config": "c", "quiet": "q", "verbose": "v"} {
+	for name, short := range map[string]string{"config": "c", "quiet": "q", "verbose": ""} {
 		f := root.PersistentFlags().Lookup(name)
 		if f == nil {
 			t.Fatalf("root is missing the --%s flag", name)
@@ -225,6 +225,26 @@ func TestRootPersistentFlags(t *testing.T) {
 	}
 	if !g.quiet || !g.verbose || g.configPath != "x.yaml" {
 		t.Errorf("parsed globals = %+v, want quiet/verbose set and configPath x.yaml", g)
+	}
+}
+
+func TestShorthandVIsVersionNotVerbose(t *testing.T) {
+	// cobra assigns -v to --version only when the shorthand is free. 0.1.x
+	// shipped `snowball -v` printing the version, so claiming -v for --verbose
+	// would silently turn it into help output while still exiting 0.
+	root, _ := newRoot("v1.2.3")
+	root.SetArgs([]string{"-v"})
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	if err := root.Execute(); err != nil {
+		t.Fatalf("snowball -v returned %v, want it to print the version", err)
+	}
+	if !strings.Contains(out.String(), "v1.2.3") {
+		t.Errorf("snowball -v printed %q, want the version", out.String())
+	}
+	if f := root.PersistentFlags().Lookup("verbose"); f != nil && f.Shorthand != "" {
+		t.Errorf("--verbose has shorthand %q; -v belongs to --version", f.Shorthand)
 	}
 }
 

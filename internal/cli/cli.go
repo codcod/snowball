@@ -46,7 +46,10 @@ func newRoot(version string) (*cobra.Command, *globals) {
 		"path to snowball.yaml (default: nearest one, searching upwards)")
 	root.PersistentFlags().BoolVarP(&g.quiet, "quiet", "q", false,
 		"suppress progress; tool output is still shown on failure")
-	root.PersistentFlags().BoolVarP(&g.verbose, "verbose", "v", false,
+	// Deliberately no -v shorthand: cobra assigns -v to --version when it is
+	// free, and 0.1.x shipped that. Taking it for --verbose would silently
+	// turn `snowball -v` from a version string into help text, still exiting 0.
+	root.PersistentFlags().BoolVar(&g.verbose, "verbose", false,
 		"log every command snowball runs")
 
 	root.AddCommand(buildCmd(g), watchCmd(g), checkCmd(g), cleanCmd(g), doctorCmd(), setupCmd(), initCmd(), versionCmd(version))
