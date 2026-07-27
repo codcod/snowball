@@ -47,7 +47,7 @@ func newRoot(version string) (*cobra.Command, *globals) {
 	root.PersistentFlags().BoolVarP(&g.verbose, "verbose", "v", false,
 		"log every command snowball runs")
 
-	root.AddCommand(buildCmd(g), checkCmd(g), doctorCmd(), setupCmd(), initCmd(), versionCmd(version))
+	root.AddCommand(buildCmd(g), checkCmd(g), cleanCmd(g), doctorCmd(), setupCmd(), initCmd(), versionCmd(version))
 	return root, g
 }
 
@@ -123,6 +123,43 @@ func checkCmd(g *globals) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringArrayVar(&books, "book", nil, "limit to book(s) by out/src name (repeatable)")
+	return cmd
+}
+
+func cleanCmd(g *globals) *cobra.Command {
+	var (
+		pdf, epub bool
+		outDir    string
+		books     []string
+		withCache bool
+	)
+	cmd := &cobra.Command{
+		Use:   "clean",
+		Short: "Remove the PDFs/EPUBs a build would produce",
+		// No requireToolchain: removing files must not need ruby installed.
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load(g.configPath)
+			if err != nil {
+				return err
+			}
+			var formats []string
+			if pdf {
+				formats = append(formats, "pdf")
+			}
+			if epub {
+				formats = append(formats, "epub")
+			}
+			return render.Clean(cfg, render.Options{
+				Formats: formats, OutDir: outDir, Books: books,
+				Quiet: g.quiet, Verbose: g.verbose,
+			}, withCache)
+		},
+	}
+	cmd.Flags().BoolVar(&pdf, "pdf", false, "only remove PDFs (default: config formats)")
+	cmd.Flags().BoolVar(&epub, "epub", false, "only remove EPUBs (default: config formats)")
+	cmd.Flags().StringVarP(&outDir, "out", "o", "", "output directory the build used")
+	cmd.Flags().StringArrayVar(&books, "book", nil, "limit to book(s) by out/src name (repeatable)")
+	cmd.Flags().BoolVar(&withCache, "cache", false, "also remove asciidoctor's .asciidoctor cache directories")
 	return cmd
 }
 

@@ -8,8 +8,10 @@ package render
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -170,6 +172,66 @@ func renderOne(cfg *config.Config, b config.Book, format string, opts Options, r
 	default:
 		return fmt.Errorf("unknown format %q", format)
 	}
+}
+
+// formatExt maps a format name to the extension Build gives its output.
+func formatExt(format string) (string, error) {
+	switch strings.ToLower(format) {
+	case "pdf":
+		return ".pdf", nil
+	case "epub":
+		return ".epub", nil
+	default:
+		return "", fmt.Errorf("unknown format %q", format)
+	}
+}
+
+// Clean removes the outputs Build would produce. It deliberately does not touch
+// generated diagram images: those are written next to the sources and cannot be
+// told apart from hand-authored ones. The .asciidoctor cache is unambiguous, so
+// it is removed when withCache is set.
+func Clean(cfg *config.Config, opts Options, withCache bool) error {
+	books := selectBooks(cfg, opts.Books)
+	if len(books) == 0 {
+		return fmt.Errorf("no books matched")
+	}
+	formats := opts.Formats
+	if len(formats) == 0 {
+		formats = cfg.Formats
+	}
+	u := newUI(opts)
+
+	for _, b := range books {
+		for _, f := range formats {
+			ext, err := formatExt(f)
+			if err != nil {
+				return err
+			}
+			if err := removePath(outputPath(cfg, b, opts.OutDir, ext), u); err != nil {
+				return err
+			}
+		}
+		if withCache {
+			cache := filepath.Join(filepath.Dir(cfg.Path(b.Src)), ".asciidoctor")
+			if err := removePath(cache, u); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// removePath deletes p, reporting it. Missing paths are skipped silently, so
+// clean is idempotent and does not claim to have removed what was never there.
+func removePath(p string, u *ui) error {
+	if _, err := os.Lstat(p); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err := os.RemoveAll(p); err != nil {
+		return fmt.Errorf("remove %s: %w", p, err)
+	}
+	u.logf("snowball: removed %s\n", p)
+	return nil
 }
 
 // Check validates every selected master by rendering to a null sink with the

@@ -16,6 +16,7 @@ snowball setup       # install the pinned toolchain (gems + mermaid-cli + Chrome
 snowball doctor      # verify everything is present
 snowball build       # render PDFs + EPUBs per snowball.yaml
 snowball check       # validate masters without keeping artifacts (MR pipelines)
+snowball clean       # delete the outputs a build would produce
 ```
 
 ## Configuration — `snowball.yaml`
@@ -78,6 +79,15 @@ rejected here rather than silently overwritten; use `revision`, `mermaid` and
 > `attributes` previously took a path to a shared `.adoc` file, but was never
 > passed to asciidoctor. That form is now a load error; to include a shared file,
 > use `include::docs/attributes.adoc[]` in the book master.
+
+### Cleaning
+
+`snowball clean` removes the `.pdf`/`.epub` files a build would produce, honouring
+`--book`, `--pdf`/`--epub` and `-o`. It does not need the toolchain installed.
+
+Generated diagram images are left alone — they sit next to the sources and cannot
+be told apart from hand-authored ones. `--cache` additionally drops the
+`.asciidoctor` cache directories, which are unambiguously generated.
 
 ## Toolchain boundary
 

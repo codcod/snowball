@@ -3,6 +3,7 @@ package render
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -679,6 +680,128 @@ func TestBuildParallel(t *testing.T) {
 			if depth > 1 {
 				t.Fatalf("two formats of one book overlapped:\n%s", strings.Join(lines, "\n"))
 			}
+		}
+	})
+}
+
+func TestClean(t *testing.T) {
+	// touch creates the file, making parent dirs as needed.
+	touch := func(t *testing.T, p string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exists := func(p string) bool { _, err := os.Lstat(p); return err == nil }
+
+	t.Run("removes the configured outputs", func(t *testing.T) {
+		cfg := testConfig(t, config.Book{Src: "docs/a.adoc", Out: "a"}, config.Book{Src: "docs/b.adoc", Out: "b"})
+		pdf := filepath.Join(cfg.Dir, "docs", "a.pdf")
+		epub := filepath.Join(cfg.Dir, "docs", "a.epub")
+		bpdf := filepath.Join(cfg.Dir, "docs", "b.pdf")
+		src := filepath.Join(cfg.Dir, "docs", "a.adoc")
+		for _, p := range []string{pdf, epub, bpdf, src} {
+			touch(t, p)
+		}
+
+		var out bytes.Buffer
+		if err := Clean(cfg, Options{Out: &out}, false); err != nil {
+			t.Fatalf("Clean: %v", err)
+		}
+		for _, p := range []string{pdf, epub, bpdf} {
+			if exists(p) {
+				t.Errorf("%s should have been removed", filepath.Base(p))
+			}
+		}
+		if !exists(src) {
+			t.Error("Clean must never remove a source document")
+		}
+		if !strings.Contains(out.String(), "removed") {
+			t.Errorf("Clean should report what it removed, got %q", out.String())
+		}
+	})
+
+	t.Run("is idempotent and silent about absent files", func(t *testing.T) {
+		cfg := testConfig(t, config.Book{Src: "docs/a.adoc", Out: "a"})
+		var out bytes.Buffer
+		if err := Clean(cfg, Options{Out: &out}, false); err != nil {
+			t.Fatalf("Clean on a clean tree should succeed: %v", err)
+		}
+		if out.Len() != 0 {
+			t.Errorf("Clean claimed to remove files that never existed: %q", out.String())
+		}
+	})
+
+	t.Run("honours the format filter", func(t *testing.T) {
+		cfg := testConfig(t, config.Book{Src: "docs/a.adoc", Out: "a"})
+		pdf := filepath.Join(cfg.Dir, "docs", "a.pdf")
+		epub := filepath.Join(cfg.Dir, "docs", "a.epub")
+		touch(t, pdf)
+		touch(t, epub)
+
+		if err := Clean(cfg, Options{Formats: []string{"pdf"}, Out: io.Discard}, false); err != nil {
+			t.Fatalf("Clean: %v", err)
+		}
+		if exists(pdf) {
+			t.Error("a.pdf should have been removed")
+		}
+		if !exists(epub) {
+			t.Error("a.epub should have survived --pdf")
+		}
+	})
+
+	t.Run("honours the out dir", func(t *testing.T) {
+		cfg := testConfig(t, config.Book{Src: "docs/a.adoc", Out: "a"})
+		outDir := t.TempDir()
+		built := filepath.Join(outDir, "a.pdf")
+		beside := filepath.Join(cfg.Dir, "docs", "a.pdf")
+		touch(t, built)
+		touch(t, beside)
+
+		if err := Clean(cfg, Options{Formats: []string{"pdf"}, OutDir: outDir, Out: io.Discard}, false); err != nil {
+			t.Fatalf("Clean: %v", err)
+		}
+		if exists(built) {
+			t.Error("the output in --out should have been removed")
+		}
+		if !exists(beside) {
+			t.Error("only the --out copy should be removed")
+		}
+	})
+
+	t.Run("cache removal is opt-in", func(t *testing.T) {
+		cfg := testConfig(t, config.Book{Src: "docs/a.adoc", Out: "a"})
+		cache := filepath.Join(cfg.Dir, "docs", ".asciidoctor", "diagram", "x.cache")
+		touch(t, cache)
+
+		if err := Clean(cfg, Options{Out: io.Discard}, false); err != nil {
+			t.Fatalf("Clean: %v", err)
+		}
+		if !exists(cache) {
+			t.Fatal("the cache must survive a plain clean")
+		}
+		if err := Clean(cfg, Options{Out: io.Discard}, true); err != nil {
+			t.Fatalf("Clean --cache: %v", err)
+		}
+		if exists(filepath.Join(cfg.Dir, "docs", ".asciidoctor")) {
+			t.Error("--cache should remove the .asciidoctor directory")
+		}
+	})
+
+	t.Run("rejects an unknown format", func(t *testing.T) {
+		cfg := testConfig(t, config.Book{Src: "docs/a.adoc", Out: "a"})
+		if err := Clean(cfg, Options{Formats: []string{"mobi"}, Out: io.Discard}, false); err == nil {
+			t.Fatal("expected an error for an unknown format")
+		}
+	})
+
+	t.Run("errors when no book matches", func(t *testing.T) {
+		cfg := testConfig(t, config.Book{Src: "docs/a.adoc", Out: "a"})
+		if err := Clean(cfg, Options{Books: []string{"missing"}, Out: io.Discard}, false); err == nil {
+			t.Fatal("expected an error when the filter matches nothing")
 		}
 	})
 }
