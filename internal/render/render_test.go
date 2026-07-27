@@ -64,6 +64,36 @@ func argLog(t *testing.T, bin, name string) string {
 	return log
 }
 
+// argLogDir installs a shim that writes each invocation's argv to its own file
+// in a fresh directory, and returns that directory. Unlike argLog this is safe
+// under concurrency: appending to one shared log from several processes
+// interleaves their lines and destroys the record boundaries.
+func argLogDir(t *testing.T, bin, name string) string {
+	t.Helper()
+	dir := t.TempDir()
+	shimBin(t, bin, name, `printf '%s\n' "$@" > "$(mktemp `+dir+`/inv.XXXXXX)"`)
+	return dir
+}
+
+// readInvocationSet reads an argLogDir into one []string per invocation. The
+// order is unspecified, so assert on the set, not the sequence.
+func readInvocationSet(t *testing.T, dir string) [][]string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read arg log dir: %v", err)
+	}
+	var out [][]string
+	for _, e := range entries {
+		raw, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n"))
+	}
+	return out
+}
+
 // readInvocations splits an argLog file into one []string per invocation.
 func readInvocations(t *testing.T, log string) [][]string {
 	t.Helper()
@@ -335,7 +365,9 @@ func TestBuildInvokesRenderers(t *testing.T) {
 	cfg.Theme = "docs/pdf-theme/mybook-theme.yml"
 	outDir := t.TempDir()
 
-	if err := Build(cfg, Options{OutDir: outDir, Rev: "v9.9.9", Date: "01 January 2000"}); err != nil {
+	// Jobs: 1 because this test asserts on invocation order, which is only
+	// defined for a serial build.
+	if err := Build(cfg, Options{Jobs: 1, OutDir: outDir, Rev: "v9.9.9", Date: "01 January 2000"}); err != nil {
 		t.Fatalf("Build: %v", err)
 	}
 
@@ -527,6 +559,134 @@ func TestBuildOutputVerbosity(t *testing.T) {
 			t.Errorf("stderr sink = %q, want the child's stderr", errOut.String())
 		}
 	})
+}
+
+func TestBuildParallel(t *testing.T) {
+	books := []config.Book{
+		{Src: "docs/a.adoc", Out: "a"},
+		{Src: "docs/b.adoc", Out: "b"},
+		{Src: "docs/c.adoc", Out: "c"},
+	}
+
+	t.Run("renders every book and format exactly once", func(t *testing.T) {
+		bin := shimPath(t)
+		shimBin(t, bin, "mmdc", "exit 0")
+		log := argLogDir(t, bin, "bundle")
+
+		cfg := testConfig(t, books...)
+		var out, errOut bytes.Buffer
+		if err := Build(cfg, Options{Jobs: 3, OutDir: t.TempDir(), Out: &out, ErrOut: &errOut}); err != nil {
+			t.Fatalf("Build: %v", err)
+		}
+		inv := readInvocationSet(t, log)
+		if len(inv) != 6 { // 3 books x 2 formats
+			t.Fatalf("bundle invoked %d times, want 6", len(inv))
+		}
+		seen := map[string]int{}
+		for _, in := range inv {
+			for _, a := range in {
+				if strings.HasSuffix(a, ".pdf") || strings.HasSuffix(a, ".epub") {
+					seen[filepath.Base(a)]++
+				}
+			}
+		}
+		for _, want := range []string{"a.pdf", "a.epub", "b.pdf", "b.epub", "c.pdf", "c.epub"} {
+			if seen[want] != 1 {
+				t.Errorf("%s rendered %d times, want 1 (all: %v)", want, seen[want], seen)
+			}
+		}
+	})
+
+	t.Run("each book's output stays contiguous", func(t *testing.T) {
+		bin := shimPath(t)
+		shimBin(t, bin, "mmdc", "exit 0")
+		// Sleep between the two writes: with unbuffered concurrent output the
+		// books' lines would interleave.
+		shimBin(t, bin, "bundle", `echo "start $*"; sleep 0.05; echo "end $*"; exit 0`)
+
+		cfg := testConfig(t, books...)
+		cfg.Formats = []string{"pdf"}
+		var out, errOut bytes.Buffer
+		if err := Build(cfg, Options{Jobs: 3, OutDir: t.TempDir(), Out: &out, ErrOut: &errOut}); err != nil {
+			t.Fatalf("Build: %v", err)
+		}
+		lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+		for i := 0; i < len(lines)-1; i++ {
+			if strings.HasPrefix(lines[i], "start ") && !strings.HasPrefix(lines[i+1], "end ") {
+				t.Errorf("output interleaved: %q followed by %q\nfull:\n%s", lines[i], lines[i+1], out.String())
+			}
+		}
+	})
+
+	t.Run("reports a failure", func(t *testing.T) {
+		bin := shimPath(t)
+		shimBin(t, bin, "mmdc", "exit 0")
+		shimBin(t, bin, "bundle", `case "$*" in *b.pdf*) echo boom >&2; exit 1;; esac; exit 0`)
+
+		cfg := testConfig(t, books...)
+		var out, errOut bytes.Buffer
+		err := Build(cfg, Options{Jobs: 3, OutDir: t.TempDir(), Out: &out, ErrOut: &errOut})
+		if err == nil {
+			t.Fatal("expected Build to fail when a book fails to render")
+		}
+	})
+
+	t.Run("jobs=1 is serial and ordered", func(t *testing.T) {
+		bin := shimPath(t)
+		shimBin(t, bin, "mmdc", "exit 0")
+		log := argLog(t, bin, "bundle")
+
+		cfg := testConfig(t, books...)
+		cfg.Formats = []string{"pdf"}
+		var out, errOut bytes.Buffer
+		if err := Build(cfg, Options{Jobs: 1, OutDir: t.TempDir(), Out: &out, ErrOut: &errOut}); err != nil {
+			t.Fatalf("Build: %v", err)
+		}
+		inv := readInvocations(t, log)
+		for i, want := range []string{"a.pdf", "b.pdf", "c.pdf"} {
+			if !strings.Contains(strings.Join(inv[i], " "), want) {
+				t.Errorf("invocation %d = %v, want %s", i, inv[i], want)
+			}
+		}
+	})
+
+	t.Run("a book's formats never run concurrently", func(t *testing.T) {
+		bin := shimPath(t)
+		shimBin(t, bin, "mmdc", "exit 0")
+		// asciidoctor-diagram writes generated images next to the source, so
+		// the formats of one book must not overlap. Each render records its
+		// own start/end around a sleep; overlap would show up as interleaving.
+		log := filepath.Join(t.TempDir(), "order.log")
+		shimBin(t, bin, "bundle", `n=$(echo "$*" | tr ' ' '\n' | grep -c .); echo "IN $2" >> `+log+`; sleep 0.05; echo "OUT $2" >> `+log+`; exit 0`)
+
+		cfg := testConfig(t, config.Book{Src: "docs/a.adoc", Out: "a"})
+		var out, errOut bytes.Buffer
+		if err := Build(cfg, Options{Jobs: 4, OutDir: t.TempDir(), Out: &out, ErrOut: &errOut}); err != nil {
+			t.Fatalf("Build: %v", err)
+		}
+		raw, err := os.ReadFile(log)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+		depth := 0
+		for _, l := range lines {
+			if strings.HasPrefix(l, "IN") {
+				depth++
+			} else {
+				depth--
+			}
+			if depth > 1 {
+				t.Fatalf("two formats of one book overlapped:\n%s", strings.Join(lines, "\n"))
+			}
+		}
+	})
+}
+
+func TestDefaultJobsIsCapped(t *testing.T) {
+	if got := defaultJobs(); got < 1 || got > 4 {
+		t.Errorf("defaultJobs() = %d, want between 1 and 4", got)
+	}
 }
 
 func TestBuildWithoutThemeOmitsThemeFlags(t *testing.T) {

@@ -68,6 +68,7 @@ func buildCmd(g *globals) *cobra.Command {
 		outDir    string
 		rev, date string
 		books     []string
+		jobs      int
 	)
 	cmd := &cobra.Command{
 		Use:   "build",
@@ -89,7 +90,7 @@ func buildCmd(g *globals) *cobra.Command {
 			}
 			return render.Build(cfg, render.Options{
 				Formats: formats, OutDir: outDir, Rev: rev, Date: date, Books: books,
-				Quiet: g.quiet, Verbose: g.verbose,
+				Jobs: jobs, Quiet: g.quiet, Verbose: g.verbose,
 			})
 		},
 	}
@@ -99,6 +100,7 @@ func buildCmd(g *globals) *cobra.Command {
 	cmd.Flags().StringVar(&rev, "rev", "", "revnumber override (default: git describe)")
 	cmd.Flags().StringVar(&date, "date", "", "revdate override (default: today)")
 	cmd.Flags().StringArrayVar(&books, "book", nil, "limit to book(s) by out/src name (repeatable)")
+	cmd.Flags().IntVarP(&jobs, "jobs", "j", 0, "books to render concurrently (default: up to 4; 1 is serial)")
 	return cmd
 }
 

@@ -54,6 +54,16 @@ a specific config.
 `snowball.yaml` is discovered by walking up from the working directory, so
 `cd docs/ && snowball build` works the same as running from the repo root.
 
+### Parallelism
+
+`-j N` renders up to N books at once (default: up to 4, `-j 1` forces serial).
+
+Concurrency is per **book**, never per format. asciidoctor-diagram writes
+generated images and its `.asciidoctor` cache next to the source, so the PDF and
+EPUB of one book share those files and must not run together. Serialising them
+is also faster: the second format reuses the diagram cache the first populated
+and costs a fraction of it.
+
 ### Attributes
 
 Every key under `attributes` becomes an `-a` flag on each render, in all three of

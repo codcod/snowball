@@ -15,6 +15,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/codcod/snowball/assets"
 	"github.com/codcod/snowball/internal/config"
@@ -30,10 +33,20 @@ type Options struct {
 	Date    string   // revdate override
 	Books   []string // filter by out/src stem; empty means all
 
+	Jobs    int       // books rendered concurrently; 0 picks a default, 1 is serial
 	Quiet   bool      // suppress progress; child output only on failure
 	Verbose bool      // additionally log every command line
 	Out     io.Writer // progress + child stdout; nil means os.Stdout
 	ErrOut  io.Writer // child stderr; nil means os.Stderr
+}
+
+// defaultJobs caps concurrency well below NumCPU: every render can spawn a
+// headless Chrome for diagrams, so the ceiling is memory, not CPU.
+func defaultJobs() int {
+	if n := runtime.NumCPU(); n < 4 {
+		return n
+	}
+	return 4
 }
 
 // ui is the output policy for one render run. Keeping stdout and stderr
@@ -63,6 +76,18 @@ func (u *ui) logf(format string, a ...any) {
 	fmt.Fprintf(u.out, format, a...)
 }
 
+// buffered returns a copy writing into memory, plus a flush that replays it to
+// the parent in one go. Used by the parallel path to keep each job's output
+// contiguous.
+func (u *ui) buffered() (*ui, func()) {
+	var outBuf, errBuf bytes.Buffer
+	child := &ui{out: &outBuf, errOut: &errBuf, quiet: u.quiet, verbose: u.verbose}
+	return child, func() {
+		_, _ = u.out.Write(outBuf.Bytes())
+		_, _ = u.errOut.Write(errBuf.Bytes())
+	}
+}
+
 // Build renders every selected book to every selected format.
 func Build(cfg *config.Config, opts Options) error {
 	rev, date := revision.Resolve(cfg, opts.Rev, opts.Date)
@@ -82,11 +107,54 @@ func Build(cfg *config.Config, opts Options) error {
 	}
 	defer cleanup()
 
-	for _, b := range books {
-		for _, f := range formats {
-			if err := renderOne(cfg, b, f, opts, rev, date, work, u); err != nil {
+	jobs := opts.Jobs
+	if jobs <= 0 {
+		jobs = defaultJobs()
+	}
+	if jobs > len(books) {
+		jobs = len(books)
+	}
+
+	// Concurrency is per book, never per format. asciidoctor-diagram writes its
+	// generated images and .asciidoctor cache next to the source, so the two
+	// formats of one book share those files — rendering them at once is a
+	// write-write race. It is also pointless: the second format reuses the
+	// diagram cache the first populated and costs a fraction of it, whereas
+	// running both at once makes each re-render every diagram.
+	if jobs == 1 {
+		for _, b := range books {
+			if err := renderBook(cfg, b, formats, opts, rev, date, work, u); err != nil {
 				return err
 			}
+		}
+		return nil
+	}
+
+	var g errgroup.Group
+	g.SetLimit(jobs)
+	var mu sync.Mutex
+	for _, b := range books {
+		g.Go(func() error {
+			// Buffer this book's output and replay it in one piece, so
+			// concurrent books cannot interleave mid-line.
+			bu, flush := u.buffered()
+			err := renderBook(cfg, b, formats, opts, rev, date, work, bu)
+			mu.Lock()
+			flush()
+			mu.Unlock()
+			return err
+		})
+	}
+	// Unlike the serial path this lets in-flight books finish rather than
+	// aborting them, then reports the first failure.
+	return g.Wait()
+}
+
+// renderBook renders one book to every format, in order.
+func renderBook(cfg *config.Config, b config.Book, formats []string, opts Options, rev, date string, work mermaidWork, u *ui) error {
+	for _, f := range formats {
+		if err := renderOne(cfg, b, f, opts, rev, date, work, u); err != nil {
+			return err
 		}
 	}
 	return nil
