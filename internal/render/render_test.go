@@ -374,8 +374,13 @@ func TestBuildInvokesRenderers(t *testing.T) {
 	if strings.Contains(epubJoined, "pdf-theme") {
 		t.Errorf("epub invocation must not carry PDF theme flags: %v", epub)
 	}
-	if strings.Contains(epubJoined, "asciidoctor-diagram") {
-		t.Errorf("epub invocation must not require asciidoctor-diagram: %v", epub)
+	// Without the extension loaded, mermaid-format is inert and diagrams are
+	// emitted as literal source with a zero exit — a silently broken EPUB.
+	if !strings.Contains(epubJoined, "asciidoctor-diagram") {
+		t.Errorf("epub invocation must load asciidoctor-diagram: %v", epub)
+	}
+	if !strings.Contains(epubJoined, "mermaid-puppeteer-config=") {
+		t.Errorf("epub invocation must pass the puppeteer config: %v", epub)
 	}
 	if !strings.Contains(epubJoined, filepath.Join(outDir, "a.epub")) {
 		t.Errorf("epub output path wrong: %v", epub)

@@ -54,7 +54,7 @@ func Build(cfg *config.Config, opts Options) error {
 			case "pdf":
 				err = renderPDF(cfg, b, opts.OutDir, rev, date, work)
 			case "epub":
-				err = renderEPUB(cfg, b, opts.OutDir, rev, date)
+				err = renderEPUB(cfg, b, opts.OutDir, rev, date, work)
 			default:
 				err = fmt.Errorf("unknown format %q", f)
 			}
@@ -115,14 +115,17 @@ func renderPDF(cfg *config.Config, b config.Book, outDir, rev, date string, work
 	return bundleExec(cfg, args...)
 }
 
-func renderEPUB(cfg *config.Config, b config.Book, outDir, rev, date string) error {
-	// Matches today's invocation exactly: no theme, no -r asciidoctor-diagram,
-	// error-only failure level. See PLAN.md open item 3.
+func renderEPUB(cfg *config.Config, b config.Book, outDir, rev, date string, work mermaidWork) error {
+	// No theme (asciidoctor-pdf only), error-only failure level. Unlike PDF this
+	// used to omit -r asciidoctor-diagram, which made mermaid-format inert: the
+	// diagram was emitted as its literal source with no image and a zero exit,
+	// so EPUBs silently shipped without diagrams. The extension is required.
 	out := outputPath(cfg, b, outDir, ".epub")
-	args := []string{"asciidoctor-epub3"}
+	args := []string{"asciidoctor-epub3", "-r", "asciidoctor-diagram"}
 	args = append(args, cfg.Attributes.Args()...)
 	args = append(args,
 		"-a", "mermaid-format="+cfg.Mermaid.Format,
+		"-a", "mermaid-puppeteer-config="+work.puppeteer,
 		"-a", "revnumber="+rev,
 		"-a", "revdate="+date,
 		"--failure-level="+cfg.FailureLevel.EPUB,
