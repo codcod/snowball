@@ -47,6 +47,10 @@ failure-level:
 Flags override config. `--rev`/`--date` set the revision; `--book NAME` limits to
 specific books; `--pdf`/`--epub` pick formats; `-o DIR` sets the output directory.
 
+Global: `-q`/`--quiet` silences progress (tool output is still shown if a render
+fails), `-v`/`--verbose` logs every command snowball runs, and `-c FILE` points at
+a specific config.
+
 `snowball.yaml` is discovered by walking up from the working directory, so
 `cd docs/ && snowball build` works the same as running from the repo root.
 

@@ -14,10 +14,25 @@ import (
 	"github.com/codcod/snowball/internal/toolchain"
 )
 
-var configPath string
+// globals holds the persistent flags. It is owned by Execute and passed to each
+// command constructor, rather than living at package scope, so that constructing
+// a command tree has no effect on any other tree in the same process.
+type globals struct {
+	configPath string
+	quiet      bool
+	verbose    bool
+}
 
 // Execute runs the root command. version is injected from main.
 func Execute(version string) error {
+	root, _ := newRoot(version)
+	return root.Execute()
+}
+
+// newRoot builds the command tree and returns it alongside its flag state, so
+// tests can drive a fresh, isolated tree.
+func newRoot(version string) (*cobra.Command, *globals) {
+	g := &globals{}
 	root := &cobra.Command{
 		Use:           "snowball",
 		Short:         "Render AsciiDoc books to PDF/EPUB via the native asciidoctor toolchain",
@@ -25,11 +40,15 @@ func Execute(version string) error {
 		SilenceErrors: false,
 		Version:       version,
 	}
-	root.PersistentFlags().StringVarP(&configPath, "config", "c", "",
-		"path to snowball.yaml (default: ./snowball.yaml)")
+	root.PersistentFlags().StringVarP(&g.configPath, "config", "c", "",
+		"path to snowball.yaml (default: nearest one, searching upwards)")
+	root.PersistentFlags().BoolVarP(&g.quiet, "quiet", "q", false,
+		"suppress progress; tool output is still shown on failure")
+	root.PersistentFlags().BoolVarP(&g.verbose, "verbose", "v", false,
+		"log every command snowball runs")
 
-	root.AddCommand(buildCmd(), checkCmd(), doctorCmd(), setupCmd(), initCmd(), versionCmd(version))
-	return root.Execute()
+	root.AddCommand(buildCmd(g), checkCmd(g), doctorCmd(), setupCmd(), initCmd(), versionCmd(version))
+	return root, g
 }
 
 func versionCmd(version string) *cobra.Command {
@@ -43,7 +62,7 @@ func versionCmd(version string) *cobra.Command {
 	}
 }
 
-func buildCmd() *cobra.Command {
+func buildCmd(g *globals) *cobra.Command {
 	var (
 		pdf, epub bool
 		outDir    string
@@ -54,7 +73,7 @@ func buildCmd() *cobra.Command {
 		Use:   "build",
 		Short: "Render configured books to PDF and/or EPUB",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Load(configPath)
+			cfg, err := config.Load(g.configPath)
 			if err != nil {
 				return err
 			}
@@ -70,6 +89,7 @@ func buildCmd() *cobra.Command {
 			}
 			return render.Build(cfg, render.Options{
 				Formats: formats, OutDir: outDir, Rev: rev, Date: date, Books: books,
+				Quiet: g.quiet, Verbose: g.verbose,
 			})
 		},
 	}
@@ -82,20 +102,22 @@ func buildCmd() *cobra.Command {
 	return cmd
 }
 
-func checkCmd() *cobra.Command {
+func checkCmd(g *globals) *cobra.Command {
 	var books []string
 	cmd := &cobra.Command{
 		Use:   "check",
 		Short: "Validate book masters (render + discard) — for MR pipelines",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Load(configPath)
+			cfg, err := config.Load(g.configPath)
 			if err != nil {
 				return err
 			}
 			if err := requireToolchain(); err != nil {
 				return err
 			}
-			return render.Check(cfg, render.Options{Books: books})
+			return render.Check(cfg, render.Options{
+				Books: books, Quiet: g.quiet, Verbose: g.verbose,
+			})
 		},
 	}
 	cmd.Flags().StringArrayVar(&books, "book", nil, "limit to book(s) by out/src name (repeatable)")

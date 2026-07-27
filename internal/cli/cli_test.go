@@ -195,7 +195,7 @@ func TestVersionCommandPrintsVersion(t *testing.T) {
 }
 
 func TestBuildCommandFlags(t *testing.T) {
-	cmd := buildCmd()
+	cmd := buildCmd(&globals{})
 	for _, name := range []string{"pdf", "epub", "out", "rev", "date", "book"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Errorf("build is missing the --%s flag", name)
@@ -209,8 +209,43 @@ func TestBuildCommandFlags(t *testing.T) {
 	}
 }
 
+func TestRootPersistentFlags(t *testing.T) {
+	root, g := newRoot("v0.0.0")
+	for name, short := range map[string]string{"config": "c", "quiet": "q", "verbose": "v"} {
+		f := root.PersistentFlags().Lookup(name)
+		if f == nil {
+			t.Fatalf("root is missing the --%s flag", name)
+		}
+		if f.Shorthand != short {
+			t.Errorf("--%s shorthand = %q, want %q", name, f.Shorthand, short)
+		}
+	}
+	if err := root.PersistentFlags().Parse([]string{"--quiet", "--verbose", "-c", "x.yaml"}); err != nil {
+		t.Fatal(err)
+	}
+	if !g.quiet || !g.verbose || g.configPath != "x.yaml" {
+		t.Errorf("parsed globals = %+v, want quiet/verbose set and configPath x.yaml", g)
+	}
+}
+
+func TestNewRootTreesAreIndependent(t *testing.T) {
+	// The flag state used to live at package scope, so building a second
+	// command tree clobbered the first.
+	_, a := newRoot("v0.0.0")
+	rootB, b := newRoot("v0.0.0")
+	if err := rootB.PersistentFlags().Parse([]string{"-c", "b.yaml"}); err != nil {
+		t.Fatal(err)
+	}
+	if a.configPath != "" {
+		t.Errorf("first tree's configPath = %q, want it untouched by the second", a.configPath)
+	}
+	if b.configPath != "b.yaml" {
+		t.Errorf("second tree's configPath = %q, want b.yaml", b.configPath)
+	}
+}
+
 func TestCheckCommandFlags(t *testing.T) {
-	cmd := checkCmd()
+	cmd := checkCmd(&globals{})
 	if cmd.Flags().Lookup("book") == nil {
 		t.Error("check is missing the --book flag")
 	}
@@ -221,10 +256,7 @@ func TestCheckCommandFlags(t *testing.T) {
 
 func TestBuildFailsOnMissingConfig(t *testing.T) {
 	t.Chdir(t.TempDir())
-	configPath = ""
-	t.Cleanup(func() { configPath = "" })
-
-	_, err := runCmd(t, buildCmd())
+	_, err := runCmd(t, buildCmd(&globals{}))
 	if err == nil {
 		t.Fatal("expected build to fail with no snowball.yaml present")
 	}
@@ -240,10 +272,7 @@ func TestBuildHonoursConfigPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Chdir(t.TempDir())
-	configPath = custom
-	t.Cleanup(func() { configPath = "" })
-
-	_, err := runCmd(t, buildCmd())
+	_, err := runCmd(t, buildCmd(&globals{configPath: custom}))
 	if err == nil {
 		t.Fatal("expected build to fail: the custom config declares no books")
 	}
@@ -259,11 +288,8 @@ func TestBuildStopsAtToolchainCheck(t *testing.T) {
 	if err := os.WriteFile(config.DefaultFile, []byte("books:\n  - src: a.adoc\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	configPath = ""
-	t.Cleanup(func() { configPath = "" })
-
 	var err error
-	captureStdout(t, func() { _, err = runCmd(t, buildCmd()) })
+	captureStdout(t, func() { _, err = runCmd(t, buildCmd(&globals{})) })
 	if err == nil {
 		t.Fatal("expected build to fail when the toolchain is incomplete")
 	}
@@ -279,11 +305,8 @@ func TestCheckStopsAtToolchainCheck(t *testing.T) {
 	if err := os.WriteFile(config.DefaultFile, []byte("books:\n  - src: a.adoc\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	configPath = ""
-	t.Cleanup(func() { configPath = "" })
-
 	var err error
-	captureStdout(t, func() { _, err = runCmd(t, checkCmd()) })
+	captureStdout(t, func() { _, err = runCmd(t, checkCmd(&globals{})) })
 	if err == nil {
 		t.Fatal("expected check to fail when the toolchain is incomplete")
 	}
@@ -365,16 +388,13 @@ func TestBuildFormatFlagsMapToOptions(t *testing.T) {
 	if err := os.WriteFile(config.DefaultFile, []byte("books:\n  - src: a.adoc\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	configPath = ""
-	t.Cleanup(func() { configPath = "" })
-
 	// Log render invocations only; doctor's `bundle --version` probe must still
 	// answer normally or requireToolchain would fail.
 	log := filepath.Join(t.TempDir(), "bundle.log")
 	shimBin(t, bin, "bundle", `case "$1" in exec) echo "$*" >> `+log+`;; *) echo 'bundle 1.0.0';; esac`)
 
 	var err error
-	captureStdout(t, func() { _, err = runCmd(t, buildCmd(), "--pdf", "--rev", "v1.0.0", "--date", "today") })
+	captureStdout(t, func() { _, err = runCmd(t, buildCmd(&globals{}), "--pdf", "--rev", "v1.0.0", "--date", "today") })
 	if err != nil {
 		t.Fatalf("build --pdf: %v", err)
 	}
@@ -403,11 +423,8 @@ func TestBuildBookFilterIsPassedThrough(t *testing.T) {
 	if err := os.WriteFile(config.DefaultFile, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	configPath = ""
-	t.Cleanup(func() { configPath = "" })
-
 	var err error
-	captureStdout(t, func() { _, err = runCmd(t, buildCmd(), "--book", "nonexistent") })
+	captureStdout(t, func() { _, err = runCmd(t, buildCmd(&globals{}), "--book", "nonexistent") })
 	if err == nil || !strings.Contains(err.Error(), "no books matched") {
 		t.Fatalf("build error = %v, want \"no books matched\"", err)
 	}

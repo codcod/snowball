@@ -1,6 +1,7 @@
 package render
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -234,7 +235,7 @@ func TestPrepMermaid(t *testing.T) {
 	cfg := testConfig(t, config.Book{Src: "a.adoc", Out: "a"})
 	cfg.Mermaid.PuppeteerArgs = []string{"--no-sandbox", "--disable-gpu"}
 
-	work, cleanup, err := prepMermaid(cfg)
+	work, cleanup, err := prepMermaid(cfg, newUI(Options{}))
 	if err != nil {
 		t.Fatalf("prepMermaid: %v", err)
 	}
@@ -281,7 +282,7 @@ func TestPrepMermaidChromeFailure(t *testing.T) {
 	shimBin(t, bin, "mmdc", "echo 'could not launch chrome' >&2; exit 1")
 	cfg := testConfig(t, config.Book{Src: "a.adoc", Out: "a"})
 
-	work, cleanup, err := prepMermaid(cfg)
+	work, cleanup, err := prepMermaid(cfg, newUI(Options{}))
 	defer cleanup()
 	if err == nil {
 		t.Fatal("expected an error when mmdc fails")
@@ -445,6 +446,87 @@ func TestConfiguredAttributesCannotOverrideManagedOnes(t *testing.T) {
 	if last != "revnumber=v9.9.9" {
 		t.Errorf("last revnumber = %q, want revnumber=v9.9.9 (snowball's value must win)", last)
 	}
+}
+
+func TestBuildOutputVerbosity(t *testing.T) {
+	newCfg := func(t *testing.T) *config.Config {
+		cfg := testConfig(t, config.Book{Src: "docs/a.adoc", Out: "a"})
+		cfg.Formats = []string{"pdf"}
+		return cfg
+	}
+
+	t.Run("normal writes progress to the sink", func(t *testing.T) {
+		bin := shimPath(t)
+		shimBin(t, bin, "mmdc", "exit 0")
+		shimBin(t, bin, "bundle", "exit 0")
+
+		var out, errOut bytes.Buffer
+		if err := Build(newCfg(t), Options{Out: &out, ErrOut: &errOut}); err != nil {
+			t.Fatalf("Build: %v", err)
+		}
+		if !strings.Contains(out.String(), "snowball: pdf") {
+			t.Errorf("progress missing from sink: %q", out.String())
+		}
+	})
+
+	t.Run("quiet suppresses progress on success", func(t *testing.T) {
+		bin := shimPath(t)
+		shimBin(t, bin, "mmdc", "exit 0")
+		shimBin(t, bin, "bundle", "echo chatter; exit 0")
+
+		var out, errOut bytes.Buffer
+		if err := Build(newCfg(t), Options{Quiet: true, Out: &out, ErrOut: &errOut}); err != nil {
+			t.Fatalf("Build: %v", err)
+		}
+		if out.Len() != 0 || errOut.Len() != 0 {
+			t.Errorf("--quiet should print nothing on success, got out=%q err=%q", out.String(), errOut.String())
+		}
+	})
+
+	t.Run("quiet still reports why a failure happened", func(t *testing.T) {
+		bin := shimPath(t)
+		shimBin(t, bin, "mmdc", "exit 0")
+		shimBin(t, bin, "bundle", "echo 'asciidoctor exploded' >&2; exit 1")
+
+		var out, errOut bytes.Buffer
+		if err := Build(newCfg(t), Options{Quiet: true, Out: &out, ErrOut: &errOut}); err == nil {
+			t.Fatal("expected the render to fail")
+		}
+		if !strings.Contains(errOut.String(), "asciidoctor exploded") {
+			t.Errorf("--quiet swallowed the failure output: %q", errOut.String())
+		}
+	})
+
+	t.Run("verbose logs the command line", func(t *testing.T) {
+		bin := shimPath(t)
+		shimBin(t, bin, "mmdc", "exit 0")
+		shimBin(t, bin, "bundle", "exit 0")
+
+		var out, errOut bytes.Buffer
+		if err := Build(newCfg(t), Options{Verbose: true, Out: &out, ErrOut: &errOut}); err != nil {
+			t.Fatalf("Build: %v", err)
+		}
+		if !strings.Contains(out.String(), "exec bundle exec asciidoctor-pdf") {
+			t.Errorf("--verbose did not log the invocation: %q", out.String())
+		}
+	})
+
+	t.Run("child stdout and stderr stay on their own streams", func(t *testing.T) {
+		bin := shimPath(t)
+		shimBin(t, bin, "mmdc", "exit 0")
+		shimBin(t, bin, "bundle", "echo to-stdout; echo to-stderr >&2; exit 0")
+
+		var out, errOut bytes.Buffer
+		if err := Build(newCfg(t), Options{Out: &out, ErrOut: &errOut}); err != nil {
+			t.Fatalf("Build: %v", err)
+		}
+		if !strings.Contains(out.String(), "to-stdout") || strings.Contains(out.String(), "to-stderr") {
+			t.Errorf("stdout sink = %q, want only the child's stdout", out.String())
+		}
+		if !strings.Contains(errOut.String(), "to-stderr") {
+			t.Errorf("stderr sink = %q, want the child's stderr", errOut.String())
+		}
+	})
 }
 
 func TestBuildWithoutThemeOmitsThemeFlags(t *testing.T) {
