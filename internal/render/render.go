@@ -90,29 +90,53 @@ func (u *ui) buffered() (*ui, func()) {
 	}
 }
 
+// plan is the validated work a build will do.
+type plan struct {
+	books   []config.Book
+	formats []string
+}
+
+// resolvePlan resolves and validates the selection. It runs before the mermaid
+// preflight so that a bad --book or --format fails immediately with the real
+// reason, instead of after — or behind — a Chrome launch that may not even be
+// possible on this machine.
+func resolvePlan(cfg *config.Config, opts Options) (plan, error) {
+	formats := opts.Formats
+	if len(formats) == 0 {
+		formats = cfg.Formats
+	}
+	for _, f := range formats {
+		if _, err := formatExt(f); err != nil {
+			return plan{}, err
+		}
+	}
+	books := selectBooks(cfg, opts.Books)
+	if len(books) == 0 {
+		return plan{}, fmt.Errorf("no books matched")
+	}
+	return plan{books: books, formats: formats}, nil
+}
+
 // Build renders every selected book to every selected format.
 func Build(cfg *config.Config, opts Options) error {
+	p, err := resolvePlan(cfg, opts)
+	if err != nil {
+		return err
+	}
 	u := newUI(opts)
 	work, cleanup, err := prepMermaid(cfg, u)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
-	return build(cfg, opts, work, u)
+	return build(cfg, opts, p, work, u)
 }
 
-// build is Build without the mermaid preflight, so watch mode can pay that cost
-// once instead of on every rebuild.
-func build(cfg *config.Config, opts Options, work mermaidWork, u *ui) error {
+// build is Build without the preflight and validation, so watch mode can pay
+// those costs once instead of on every rebuild.
+func build(cfg *config.Config, opts Options, p plan, work mermaidWork, u *ui) error {
 	rev, date := revision.Resolve(cfg, opts.Rev, opts.Date)
-	formats := opts.Formats
-	if len(formats) == 0 {
-		formats = cfg.Formats
-	}
-	books := selectBooks(cfg, opts.Books)
-	if len(books) == 0 {
-		return fmt.Errorf("no books matched")
-	}
+	books, formats := p.books, p.formats
 
 	jobs := opts.Jobs
 	if jobs <= 0 {

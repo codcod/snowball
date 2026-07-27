@@ -27,6 +27,12 @@ const WatchSettle = 300 * time.Millisecond
 // A failed build does not stop the watch — recovering from an error is exactly
 // when the author most wants the loop to keep running.
 func Watch(ctx context.Context, cfg *config.Config, opts Options) error {
+	// Validate up front: starting a watcher on a selection that can never
+	// render is worse than failing now.
+	p, err := resolvePlan(cfg, opts)
+	if err != nil {
+		return err
+	}
 	u := newUI(opts)
 	work, cleanup, err := prepMermaid(cfg, u)
 	if err != nil {
@@ -51,7 +57,7 @@ func Watch(ctx context.Context, cfg *config.Config, opts Options) error {
 		if reason != "" {
 			u.logf("snowball: %s changed, rebuilding\n", reason)
 		}
-		if err := build(cfg, opts, work, u); err != nil {
+		if err := build(cfg, opts, p, work, u); err != nil {
 			// Reported, not returned: the watch must survive a broken document.
 			fmt.Fprintf(u.errOut, "snowball: build failed: %v\n", err)
 		}

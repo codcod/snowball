@@ -2,6 +2,7 @@ package render
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"os"
@@ -53,6 +54,18 @@ func shimPath(t *testing.T) string {
 	}
 	bin := t.TempDir()
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return bin
+}
+
+// isolatedPath replaces PATH with an empty directory so that no real toolchain
+// is reachable, making tests independent of what the host has installed.
+func isolatedPath(t *testing.T) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell shims are not portable to windows")
+	}
+	bin := t.TempDir()
+	t.Setenv("PATH", bin)
 	return bin
 }
 
@@ -326,7 +339,14 @@ func TestPrepMermaidChromeFailure(t *testing.T) {
 	}
 }
 
+// These three assert that a bad selection is reported before the mermaid
+// preflight runs. They use isolatedPath so no real toolchain is reachable: with
+// the ambient PATH they would pass on a machine that happens to have mmdc
+// installed even if the ordering were wrong, which is exactly how a regression
+// reached CI once.
+
 func TestBuildNoBooksMatched(t *testing.T) {
+	isolatedPath(t)
 	cfg := testConfig(t, config.Book{Src: "docs/a.adoc", Out: "a"})
 	err := Build(cfg, Options{Books: []string{"missing"}})
 	if err == nil || !strings.Contains(err.Error(), "no books matched") {
@@ -335,6 +355,7 @@ func TestBuildNoBooksMatched(t *testing.T) {
 }
 
 func TestCheckNoBooksMatched(t *testing.T) {
+	isolatedPath(t)
 	cfg := testConfig(t)
 	err := Check(cfg, Options{})
 	if err == nil || !strings.Contains(err.Error(), "no books matched") {
@@ -343,14 +364,21 @@ func TestCheckNoBooksMatched(t *testing.T) {
 }
 
 func TestBuildUnknownFormat(t *testing.T) {
-	bin := shimPath(t)
-	shimBin(t, bin, "mmdc", "exit 0")
-	shimBin(t, bin, "bundle", "exit 0")
+	isolatedPath(t)
 	cfg := testConfig(t, config.Book{Src: "docs/a.adoc", Out: "a"})
 
 	err := Build(cfg, Options{Formats: []string{"mobi"}})
 	if err == nil || !strings.Contains(err.Error(), `unknown format "mobi"`) {
 		t.Fatalf("Build error = %v, want unknown format", err)
+	}
+}
+
+func TestWatchValidatesBeforePreflight(t *testing.T) {
+	isolatedPath(t)
+	cfg := testConfig(t, config.Book{Src: "docs/a.adoc", Out: "a"})
+	err := Watch(context.Background(), cfg, Options{Books: []string{"missing"}, Out: io.Discard})
+	if err == nil || !strings.Contains(err.Error(), "no books matched") {
+		t.Fatalf("Watch error = %v, want \"no books matched\" before any watcher starts", err)
 	}
 }
 
