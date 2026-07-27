@@ -28,6 +28,63 @@ While the version is below `1.0.0`, breaking changes may land in a minor release
     sectnums: ""
   ```
 
+### Migrating from 0.1.x
+
+`attributes` is the only key that changed. `books`, `theme`, `formats`,
+`revision`, `mermaid` and `failure-level` carry over untouched, with the same
+defaults, so a 0.1.x config needs at most one edit. It fails loudly at load,
+so nothing can slip through silently:
+
+```
+Error: parse snowball.yaml: `attributes` must be a map of AsciiDoc attributes, not a path.
+```
+
+**1. Convert `attributes`.** Either inline the contents of the file:
+
+```yaml
+attributes:
+  toc: left              # was :toc: left
+  sectnums: ""           # was a bare :sectnums:
+  toc-title: false       # was :!toc-title: (unset)
+  product-version: "2026.1"
+```
+
+…or delete the `attributes:` key entirely and include the file from each book
+master, which is the idiomatic AsciiDoc route and better for a large or shared
+attribute set:
+
+```adoc
+= My Manual
+:doctype: book
+
+include::attributes.adoc[]
+```
+
+Both produce identical output.
+
+**2. Expect your documents to change.** Because 0.1.x never passed the
+attributes file to asciidoctor, attributes you set there were silently dropped.
+The same project rendering `Version is {product-version} here.`:
+
+| | output |
+|---|---|
+| 0.1.4 | `Version is {product-version} here.` |
+| 0.2.0 | `Version is 2026.1 here.` |
+
+Attributes set long ago will take effect for the first time. Diff your output
+before shipping.
+
+**3. Expect larger EPUBs.** Mermaid diagrams now render into EPUB instead of
+being emitted as literal source, so books with diagrams need a working Chrome
+for EPUB builds, not just PDF.
+
+**4. Builds are parallel by default.** Progress output is grouped per book
+rather than strictly ordered. Pass `-j 1` to restore the 0.1.x serial
+behaviour if anything parses that output.
+
+Nothing on the command line changed: every 0.1.x flag, including `-v` for the
+version, behaves as before.
+
 ### Added
 
 - `attributes` are now passed through to every render as `-a` flags, in all of
@@ -52,7 +109,8 @@ While the version is below `1.0.0`, breaking changes may land in a minor release
 - `-q`/`--quiet` suppresses progress output, holding each command's output and
   replaying it only if that render fails — silent on success without hiding the
   cause of a failure.
-- `-v`/`--verbose` logs every command snowball runs.
+- `--verbose` logs every command snowball runs. It has no `-v` shorthand on
+  purpose: `-v` remains `--version`, as in 0.1.x.
 
 ### Changed
 
