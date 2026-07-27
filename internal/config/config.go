@@ -58,11 +58,16 @@ type Config struct {
 	Dir string `yaml:"-"`
 }
 
-// Load reads the config at path (or DefaultFile in cwd when path is empty),
-// applies defaults, and validates it.
+// Load reads the config at path, applies defaults, and validates it. When path
+// is empty, DefaultFile is discovered by walking up from the working directory,
+// so snowball works from anywhere inside the repo.
 func Load(path string) (*Config, error) {
 	if path == "" {
-		path = DefaultFile
+		found, err := discover()
+		if err != nil {
+			return nil, err
+		}
+		path = found
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -82,6 +87,28 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	return &c, nil
+}
+
+// discover walks up from the working directory looking for DefaultFile, the way
+// git, cargo and npm locate their manifests, so that `cd docs/ && snowball
+// build` behaves the same as running from the repo root.
+func discover() (string, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	start := dir
+	for {
+		candidate := filepath.Join(dir, DefaultFile)
+		if fi, err := os.Stat(candidate); err == nil && !fi.IsDir() {
+			return candidate, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir { // reached the filesystem root
+			return "", fmt.Errorf("no %s found in %s or any parent directory", DefaultFile, start)
+		}
+		dir = parent
+	}
 }
 
 func (c *Config) applyDefaults() {

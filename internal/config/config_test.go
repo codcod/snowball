@@ -119,6 +119,57 @@ func TestLoadDefaultsToCwd(t *testing.T) {
 	}
 }
 
+func TestLoadWalksUpToFindConfig(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, DefaultFile), []byte("books:\n  - src: docs/m.adoc\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(root, "docs", "chapters")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(nested)
+
+	c, err := Load("")
+	if err != nil {
+		t.Fatalf("Load(\"\") should find %s in a parent directory: %v", DefaultFile, err)
+	}
+	// Dir must anchor to the directory holding the config, not the cwd, so
+	// relative book paths keep resolving against the repo root.
+	if resolved, want := c.Path(c.Books[0].Src), filepath.Join(root, "docs/m.adoc"); resolved != want {
+		t.Errorf("Path = %q, want %q", resolved, want)
+	}
+}
+
+func TestLoadNoConfigAnywhere(t *testing.T) {
+	t.Chdir(t.TempDir())
+	_, err := Load("")
+	if err == nil {
+		t.Fatal("expected an error when no config exists in the cwd or any parent")
+	}
+	if !strings.Contains(err.Error(), "any parent directory") {
+		t.Errorf("error = %q, want it to say the parent directories were searched", err)
+	}
+}
+
+func TestLoadExplicitPathDoesNotWalkUp(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, DefaultFile), []byte("books:\n  - src: m.adoc\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(root, "sub")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(nested)
+
+	// An explicit --config must be taken literally: discovery is opt-in via
+	// the empty path, otherwise a typo'd path would silently load a parent's.
+	if _, err := Load(DefaultFile); err == nil {
+		t.Fatal("explicit path should not fall back to a parent directory")
+	}
+}
+
 func TestLoadMissingFile(t *testing.T) {
 	_, err := Load(filepath.Join(t.TempDir(), "nope.yaml"))
 	if err == nil {

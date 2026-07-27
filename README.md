@@ -44,6 +44,9 @@ failure-level:
 Flags override config. `--rev`/`--date` set the revision; `--book NAME` limits to
 specific books; `--pdf`/`--epub` pick formats; `-o DIR` sets the output directory.
 
+`snowball.yaml` is discovered by walking up from the working directory, so
+`cd docs/ && snowball build` works the same as running from the repo root.
+
 ## Toolchain boundary
 
 `snowball setup` installs **language-level** deps only (asciidoctor gems via
