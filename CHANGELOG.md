@@ -8,6 +8,19 @@ While the version is below `1.0.0`, breaking changes may land in a minor release
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-07-27
+
+### Fixed
+
+- **`snowball -v` printed help instead of the version.** 0.2.0 gave the `-v`
+  shorthand to its new `--verbose` flag, taking it from `--version` — cobra
+  assigns `-v` to `--version` whenever the shorthand is free, which is what
+  0.1.x shipped. The result was silent: `snowball -v` emitted help text and
+  still exited 0, so a script reading the version captured the help output
+  instead of failing. `--verbose` is now long-form only.
+
+  Anyone on 0.2.0 should upgrade; anyone coming from 0.1.x can skip it.
+
 ## [0.2.0] - 2026-07-27
 
 ### Breaking
@@ -82,8 +95,9 @@ for EPUB builds, not just PDF.
 rather than strictly ordered. Pass `-j 1` to restore the 0.1.x serial
 behaviour if anything parses that output.
 
-Nothing on the command line changed: every 0.1.x flag, including `-v` for the
-version, behaves as before.
+**5. Upgrade to 0.2.1, not 0.2.0.** Command-line flags are otherwise unchanged
+from 0.1.x, but 0.2.0 briefly reassigned `-v` from `--version` to `--verbose`,
+so `snowball -v` printed help instead of the version. 0.2.1 restores it.
 
 ### Added
 
@@ -109,8 +123,8 @@ version, behaves as before.
 - `-q`/`--quiet` suppresses progress output, holding each command's output and
   replaying it only if that render fails — silent on success without hiding the
   cause of a failure.
-- `--verbose` logs every command snowball runs. It has no `-v` shorthand on
-  purpose: `-v` remains `--version`, as in 0.1.x.
+- `-v`/`--verbose` logs every command snowball runs. (Claiming `-v` was a
+  mistake — it belonged to `--version`. Corrected in 0.2.1.)
 
 ### Changed
 
@@ -171,7 +185,8 @@ and EPUB by orchestrating the native asciidoctor toolchain, configured through
 `snowball.yaml`, with `build`, `check`, `doctor`, `setup`, `init` and `version`
 commands.
 
-[Unreleased]: https://github.com/codcod/snowball/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/codcod/snowball/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/codcod/snowball/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/codcod/snowball/compare/v0.1.4...v0.2.0
 [0.1.4]: https://github.com/codcod/snowball/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/codcod/snowball/compare/v0.1.2...v0.1.3
