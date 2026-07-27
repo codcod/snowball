@@ -80,11 +80,13 @@ func Check(cfg *config.Config, opts Options) error {
 	defer cleanup()
 
 	for _, b := range books {
-		args := []string{"asciidoctor", "-r", "asciidoctor-diagram",
-			"-a", "mermaid-format=" + cfg.Mermaid.Format,
-			"-a", "mermaid-puppeteer-config=" + work.puppeteer,
-			"--failure-level=" + cfg.FailureLevel.Check,
-			"-o", os.DevNull, cfg.Path(b.Src)}
+		args := []string{"asciidoctor", "-r", "asciidoctor-diagram"}
+		args = append(args, cfg.Attributes.Args()...)
+		args = append(args,
+			"-a", "mermaid-format="+cfg.Mermaid.Format,
+			"-a", "mermaid-puppeteer-config="+work.puppeteer,
+			"--failure-level="+cfg.FailureLevel.Check,
+			"-o", os.DevNull, cfg.Path(b.Src))
 		fmt.Printf("snowball: check %s\n", b.Src)
 		if err := bundleExec(cfg, args...); err != nil {
 			return fmt.Errorf("check %s: %w", b.Src, err)
@@ -99,6 +101,9 @@ func renderPDF(cfg *config.Config, b config.Book, outDir, rev, date string, work
 	if dir, name, ok := cfg.ThemeDirName(); ok {
 		args = append(args, "-a", "pdf-themesdir="+dir, "-a", "pdf-theme="+name)
 	}
+	// User attributes go before snowball's own: asciidoctor takes the last -a
+	// for a given key, so this keeps --rev/--date/theme authoritative.
+	args = append(args, cfg.Attributes.Args()...)
 	args = append(args,
 		"-a", "mermaid-format="+cfg.Mermaid.Format,
 		"-a", "mermaid-puppeteer-config="+work.puppeteer,
@@ -114,12 +119,14 @@ func renderEPUB(cfg *config.Config, b config.Book, outDir, rev, date string) err
 	// Matches today's invocation exactly: no theme, no -r asciidoctor-diagram,
 	// error-only failure level. See PLAN.md open item 3.
 	out := outputPath(cfg, b, outDir, ".epub")
-	args := []string{"asciidoctor-epub3",
-		"-a", "mermaid-format=" + cfg.Mermaid.Format,
-		"-a", "revnumber=" + rev,
-		"-a", "revdate=" + date,
-		"--failure-level=" + cfg.FailureLevel.EPUB,
-		"-o", out, cfg.Path(b.Src)}
+	args := []string{"asciidoctor-epub3"}
+	args = append(args, cfg.Attributes.Args()...)
+	args = append(args,
+		"-a", "mermaid-format="+cfg.Mermaid.Format,
+		"-a", "revnumber="+rev,
+		"-a", "revdate="+date,
+		"--failure-level="+cfg.FailureLevel.EPUB,
+		"-o", out, cfg.Path(b.Src))
 	fmt.Printf("snowball: epub %s -> %s\n", b.Src, out)
 	return bundleExec(cfg, args...)
 }

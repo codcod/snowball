@@ -164,7 +164,9 @@ const starterConfig = `books:
   - src: docs/developer-handbook.adoc
     out: developers-handbook
 theme: docs/pdf-theme/ai-sdlc-theme.yml
-attributes: docs/attributes.adoc
+attributes:
+  toc: left
+  sectnums: ""
 formats: [pdf, epub]
 revision:
   from: git-describe

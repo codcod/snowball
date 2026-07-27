@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -35,6 +36,84 @@ type Mermaid struct {
 	PuppeteerArgs []string `yaml:"puppeteer-args"` // Chrome launch flags for mmdc
 }
 
+// Attributes are AsciiDoc attributes passed to every render as -a flags:
+//
+//	attributes:
+//	  toc: left          # -a toc=left
+//	  sectnums: ""       # -a sectnums        (set, no value)
+//	  toc-title: false   # -a toc-title!      (explicitly unset)
+type Attributes map[string]any
+
+// managedAttributes are set by snowball itself from dedicated config keys.
+// Letting them through would silently lose: snowball appends its own -a after
+// the user's, and asciidoctor resolves duplicate -a flags last-one-wins.
+var managedAttributes = map[string]string{
+	"revnumber":                "revision (or --rev)",
+	"revdate":                  "revision (or --date)",
+	"mermaid-format":           "mermaid.format",
+	"mermaid-puppeteer-config": "mermaid.puppeteer-args",
+	"pdf-theme":                "theme",
+	"pdf-themesdir":            "theme",
+}
+
+// UnmarshalYAML accepts a mapping and rejects the pre-0.2 scalar form with a
+// migration hint. `attributes` used to be a path to a shared .adoc that nothing
+// ever read; failing loudly beats silently ignoring it a second time.
+func (a *Attributes) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode {
+		if node.Tag == "!!null" {
+			return nil
+		}
+		return fmt.Errorf("`attributes` must be a map of AsciiDoc attributes, not a path.\n"+
+			"It previously took a filename (%q) but was never passed to asciidoctor.\n"+
+			"Replace it with the attributes themselves:\n\n"+
+			"attributes:\n  toc: left\n  sectnums: \"\"\n\n"+
+			"To keep including a shared file, use `include::%s[]` in your book master.",
+			node.Value, node.Value)
+	}
+	var m map[string]any
+	if err := node.Decode(&m); err != nil {
+		return err
+	}
+	*a = m
+	return nil
+}
+
+// Args renders the attributes as asciidoctor -a flags, sorted by key. Go
+// randomises map iteration, so without the sort the invocation would differ
+// between runs.
+func (a Attributes) Args() []string {
+	keys := make([]string, 0, len(a))
+	for k := range a {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	args := make([]string, 0, len(keys)*2)
+	for _, k := range keys {
+		args = append(args, "-a", formatAttribute(k, a[k]))
+	}
+	return args
+}
+
+func formatAttribute(key string, val any) string {
+	switch v := val.(type) {
+	case nil:
+		return key
+	case bool:
+		if v {
+			return key
+		}
+		return key + "!" // asciidoctor's "unset this attribute" syntax
+	case string:
+		if v == "" {
+			return key
+		}
+		return key + "=" + v
+	default:
+		return fmt.Sprintf("%s=%v", key, v)
+	}
+}
+
 // FailureLevel is the --failure-level passed per render mode. Mirrors today's
 // justfile/CI: PDF and check warn, EPUB errors only.
 type FailureLevel struct {
@@ -47,7 +126,7 @@ type FailureLevel struct {
 type Config struct {
 	Books        []Book       `yaml:"books"`
 	Theme        string       `yaml:"theme"`      // path to <name>-theme.yml (PDF only)
-	Attributes   string       `yaml:"attributes"` // shared attributes .adoc (informational)
+	Attributes   Attributes   `yaml:"attributes"` // -a key=value passed to every render
 	Formats      []string     `yaml:"formats"`    // default formats when none passed
 	Revision     Revision     `yaml:"revision"`
 	Mermaid      Mermaid      `yaml:"mermaid"`
@@ -151,6 +230,16 @@ func (c *Config) validate() error {
 	for _, b := range c.Books {
 		if b.Src == "" {
 			return fmt.Errorf("book entry missing src")
+		}
+	}
+	keys := make([]string, 0, len(c.Attributes))
+	for k := range c.Attributes {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if owner, ok := managedAttributes[k]; ok {
+			return fmt.Errorf("attributes.%s is set by snowball itself and would be ignored — use the `%s` setting instead", k, owner)
 		}
 	}
 	return nil

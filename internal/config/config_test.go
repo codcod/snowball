@@ -170,6 +170,101 @@ func TestLoadExplicitPathDoesNotWalkUp(t *testing.T) {
 	}
 }
 
+func TestAttributesArgs(t *testing.T) {
+	cases := []struct {
+		name string
+		attr Attributes
+		want []string
+	}{
+		{"nil is no args", nil, nil},
+		{"string value", Attributes{"toc": "left"}, []string{"-a", "toc=left"}},
+		{"empty string sets with no value", Attributes{"sectnums": ""}, []string{"-a", "sectnums"}},
+		{"nil value sets with no value", Attributes{"sectnums": nil}, []string{"-a", "sectnums"}},
+		{"true sets the attribute", Attributes{"sectnums": true}, []string{"-a", "sectnums"}},
+		{"false unsets the attribute", Attributes{"toc": false}, []string{"-a", "toc!"}},
+		{"int is stringified", Attributes{"toclevels": 3}, []string{"-a", "toclevels=3"}},
+		{"float keeps its fraction", Attributes{"v": 2026.1}, []string{"-a", "v=2026.1"}},
+		{"value containing = is preserved", Attributes{"k": "a=b"}, []string{"-a", "k=a=b"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.attr.Args()
+			if strings.Join(got, "\x00") != strings.Join(tc.want, "\x00") {
+				t.Errorf("Args() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAttributesArgsAreSorted(t *testing.T) {
+	attr := Attributes{"zulu": "1", "alpha": "2", "mike": "3"}
+	want := "-a alpha=2 -a mike=3 -a zulu=1"
+	// Go randomises map iteration, so repeat: an unsorted implementation
+	// passes a single run with high probability.
+	for i := 0; i < 50; i++ {
+		if got := strings.Join(attr.Args(), " "); got != want {
+			t.Fatalf("Args() = %q, want %q", got, want)
+		}
+	}
+}
+
+func TestLoadAttributes(t *testing.T) {
+	p := writeConfig(t, "books:\n  - src: m.adoc\nattributes:\n  toc: left\n  sectnums: \"\"\n  toclevels: 3\n")
+	c, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(c.Attributes.Args(), " "); got != "-a sectnums -a toc=left -a toclevels=3" {
+		t.Errorf("Args() = %q", got)
+	}
+}
+
+func TestLoadAttributesAsPathIsRejected(t *testing.T) {
+	p := writeConfig(t, "books:\n  - src: m.adoc\nattributes: docs/attributes.adoc\n")
+	_, err := Load(p)
+	if err == nil {
+		t.Fatal("the pre-0.2 scalar `attributes` form must be rejected, not ignored")
+	}
+	for _, want := range []string{"must be a map", "docs/attributes.adoc", "include::"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q should mention %q", err, want)
+		}
+	}
+}
+
+func TestLoadAttributesEmptyIsAllowed(t *testing.T) {
+	p := writeConfig(t, "books:\n  - src: m.adoc\nattributes:\n")
+	c, err := Load(p)
+	if err != nil {
+		t.Fatalf("an empty attributes key should be allowed: %v", err)
+	}
+	if len(c.Attributes) != 0 {
+		t.Errorf("Attributes = %v, want empty", c.Attributes)
+	}
+}
+
+func TestLoadRejectsSnowballManagedAttributes(t *testing.T) {
+	for attr, owner := range map[string]string{
+		"revnumber":                "revision",
+		"revdate":                  "revision",
+		"mermaid-format":           "mermaid.format",
+		"mermaid-puppeteer-config": "mermaid.puppeteer-args",
+		"pdf-theme":                "theme",
+		"pdf-themesdir":            "theme",
+	} {
+		t.Run(attr, func(t *testing.T) {
+			p := writeConfig(t, "books:\n  - src: m.adoc\nattributes:\n  "+attr+": x\n")
+			_, err := Load(p)
+			if err == nil {
+				t.Fatalf("attributes.%s is overwritten by snowball and must be rejected", attr)
+			}
+			if !strings.Contains(err.Error(), attr) || !strings.Contains(err.Error(), owner) {
+				t.Errorf("error %q should name both %q and %q", err, attr, owner)
+			}
+		})
+	}
+}
+
 func TestLoadMissingFile(t *testing.T) {
 	_, err := Load(filepath.Join(t.TempDir(), "nope.yaml"))
 	if err == nil {

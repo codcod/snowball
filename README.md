@@ -27,7 +27,10 @@ books:
   - src: docs/developer-handbook.adoc
     out: developers-handbook
 theme: docs/pdf-theme/ai-sdlc-theme.yml   # PDF only; -> pdf-themesdir + pdf-theme
-attributes: docs/attributes.adoc
+attributes:                                # passed to every render as -a flags
+  toc: left                                #   -a toc=left
+  sectnums: ""                             #   -a sectnums       (set, no value)
+  product-version: "2026.1"                #   -a product-version=2026.1
 formats: [pdf, epub]
 revision:
   from: git-describe                       # or: static (+ static: "1.2.3")
@@ -46,6 +49,21 @@ specific books; `--pdf`/`--epub` pick formats; `-o DIR` sets the output director
 
 `snowball.yaml` is discovered by walking up from the working directory, so
 `cd docs/ && snowball build` works the same as running from the repo root.
+
+### Attributes
+
+Every key under `attributes` becomes an `-a` flag on each render, in all three of
+PDF, EPUB and `check`. Values map as `key: value` -> `-a key=value`, `key: ""` ->
+`-a key` (set with no value), and `key: false` -> `-a key!` (explicitly unset).
+
+Attributes snowball derives from other settings — `revnumber`, `revdate`,
+`mermaid-format`, `mermaid-puppeteer-config`, `pdf-theme`, `pdf-themesdir` — are
+rejected here rather than silently overwritten; use `revision`, `mermaid` and
+`theme` instead.
+
+> `attributes` previously took a path to a shared `.adoc` file, but was never
+> passed to asciidoctor. That form is now a load error; to include a shared file,
+> use `include::docs/attributes.adoc[]` in the book master.
 
 ## Toolchain boundary
 

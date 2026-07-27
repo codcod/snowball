@@ -386,6 +386,62 @@ func TestBuildInvokesRenderers(t *testing.T) {
 	}
 }
 
+func TestConfiguredAttributesReachEveryRenderer(t *testing.T) {
+	bin := shimPath(t)
+	shimBin(t, bin, "mmdc", "exit 0")
+	log := argLog(t, bin, "bundle")
+
+	cfg := testConfig(t, config.Book{Src: "docs/a.adoc", Out: "a"})
+	cfg.Attributes = config.Attributes{"toc": "left", "sectnums": "", "toc-title": false}
+
+	if err := Build(cfg, Options{OutDir: t.TempDir()}); err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if err := Check(cfg, Options{}); err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+
+	inv := readInvocations(t, log)
+	if len(inv) != 3 { // pdf, epub, check
+		t.Fatalf("bundle invoked %d times, want 3", len(inv))
+	}
+	for _, in := range inv {
+		joined := strings.Join(in, " ")
+		for _, want := range []string{"-a toc=left", "-a sectnums", "-a toc-title!"} {
+			if !strings.Contains(joined, want) {
+				t.Errorf("%s invocation missing %q\ngot: %v", in[1], want, in)
+			}
+		}
+	}
+}
+
+func TestConfiguredAttributesCannotOverrideManagedOnes(t *testing.T) {
+	bin := shimPath(t)
+	shimBin(t, bin, "mmdc", "exit 0")
+	log := argLog(t, bin, "bundle")
+
+	cfg := testConfig(t, config.Book{Src: "docs/a.adoc", Out: "a"})
+	cfg.Formats = []string{"pdf"}
+	// config.validate rejects these, but if one ever slips through, snowball's
+	// own value must still win. asciidoctor takes the last -a for a key, so the
+	// user's must be emitted first.
+	cfg.Attributes = config.Attributes{"revnumber": "sneaky"}
+
+	if err := Build(cfg, Options{Rev: "v9.9.9", Date: "01 January 2000"}); err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	args := readInvocations(t, log)[0]
+	last := ""
+	for i, a := range args {
+		if a == "-a" && i+1 < len(args) && strings.HasPrefix(args[i+1], "revnumber=") {
+			last = args[i+1]
+		}
+	}
+	if last != "revnumber=v9.9.9" {
+		t.Errorf("last revnumber = %q, want revnumber=v9.9.9 (snowball's value must win)", last)
+	}
+}
+
 func TestBuildWithoutThemeOmitsThemeFlags(t *testing.T) {
 	bin := shimPath(t)
 	shimBin(t, bin, "mmdc", "exit 0")
