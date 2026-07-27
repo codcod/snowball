@@ -70,11 +70,14 @@ func probeVersion(path string, args []string) string {
 	if err != nil {
 		return "?"
 	}
+	// Trim, split, trim again. The leading trim discards blank lines before the
+	// version; the trailing one reaches whitespace at the end of the first line,
+	// which trimming the whole output cannot ("v1.0  \nmore" -> "v1.0").
 	line := strings.TrimSpace(string(out))
 	if i := strings.IndexByte(line, '\n'); i >= 0 {
 		line = line[:i]
 	}
-	return line
+	return strings.TrimSpace(line)
 }
 
 // cacheDir is where the embedded Gemfile is materialized and gems are installed.

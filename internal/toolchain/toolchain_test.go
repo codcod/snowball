@@ -120,6 +120,15 @@ func TestProbeVersion(t *testing.T) {
 			t.Errorf("probeVersion = %q, want ?", got)
 		}
 	})
+
+	t.Run("trims trailing whitespace on the first line", func(t *testing.T) {
+		// Trimming the whole output before splitting left this padding behind,
+		// because the trim only ever reached the end of the *last* line.
+		p := shimBin(t, bin, "paddedfirst", "printf 'v1.0  \\nmore\\n'")
+		if got := probeVersion(p, []string{"--version"}); got != "v1.0" {
+			t.Errorf("probeVersion = %q, want v1.0 with no trailing spaces", got)
+		}
+	})
 }
 
 func TestDoctorAllToolsPresent(t *testing.T) {
