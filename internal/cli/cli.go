@@ -6,6 +6,8 @@ package cli
 import (
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -47,7 +49,7 @@ func newRoot(version string) (*cobra.Command, *globals) {
 	root.PersistentFlags().BoolVarP(&g.verbose, "verbose", "v", false,
 		"log every command snowball runs")
 
-	root.AddCommand(buildCmd(g), checkCmd(g), cleanCmd(g), doctorCmd(), setupCmd(), initCmd(), versionCmd(version))
+	root.AddCommand(buildCmd(g), watchCmd(g), checkCmd(g), cleanCmd(g), doctorCmd(), setupCmd(), initCmd(), versionCmd(version))
 	return root, g
 }
 
@@ -123,6 +125,51 @@ func checkCmd(g *globals) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringArrayVar(&books, "book", nil, "limit to book(s) by out/src name (repeatable)")
+	return cmd
+}
+
+func watchCmd(g *globals) *cobra.Command {
+	var (
+		pdf, epub bool
+		outDir    string
+		rev, date string
+		books     []string
+		jobs      int
+	)
+	cmd := &cobra.Command{
+		Use:   "watch",
+		Short: "Render on every change to a book source, until interrupted",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load(g.configPath)
+			if err != nil {
+				return err
+			}
+			// Checked once here rather than per rebuild.
+			if err := requireToolchain(); err != nil {
+				return err
+			}
+			var formats []string
+			if pdf {
+				formats = append(formats, "pdf")
+			}
+			if epub {
+				formats = append(formats, "epub")
+			}
+			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			return render.Watch(ctx, cfg, render.Options{
+				Formats: formats, OutDir: outDir, Rev: rev, Date: date, Books: books,
+				Jobs: jobs, Quiet: g.quiet, Verbose: g.verbose,
+			})
+		},
+	}
+	cmd.Flags().BoolVar(&pdf, "pdf", false, "render PDF (default: config formats)")
+	cmd.Flags().BoolVar(&epub, "epub", false, "render EPUB (default: config formats)")
+	cmd.Flags().StringVarP(&outDir, "out", "o", "", "output directory (default: each book's dir)")
+	cmd.Flags().StringVar(&rev, "rev", "", "revnumber override (default: git describe)")
+	cmd.Flags().StringVar(&date, "date", "", "revdate override (default: today)")
+	cmd.Flags().StringArrayVar(&books, "book", nil, "limit to book(s) by out/src name (repeatable)")
+	cmd.Flags().IntVarP(&jobs, "jobs", "j", 0, "books to render concurrently (default: up to 4; 1 is serial)")
 	return cmd
 }
 

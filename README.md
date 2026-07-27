@@ -15,6 +15,7 @@ snowball init        # write a starter snowball.yaml
 snowball setup       # install the pinned toolchain (gems + mermaid-cli + Chrome)
 snowball doctor      # verify everything is present
 snowball build       # render PDFs + EPUBs per snowball.yaml
+snowball watch       # re-render whenever a source changes
 snowball check       # validate masters without keeping artifacts (MR pipelines)
 snowball clean       # delete the outputs a build would produce
 ```
@@ -64,6 +65,17 @@ generated images and its `.asciidoctor` cache next to the source, so the PDF and
 EPUB of one book share those files and must not run together. Serialising them
 is also faster: the second format reuses the diagram cache the first populated
 and costs a fraction of it.
+
+### Watching
+
+`snowball watch` renders once, then rebuilds on every change, keeping the
+toolchain check and the mermaid preflight out of the loop.
+
+It watches each book's whole source tree, not just the master, so edits to
+`include::`d chapters trigger a rebuild. Only `.adoc` files and the configured
+theme trigger one — that is deliberate: builds write PDFs, EPUBs and generated
+diagrams into the very directories being watched, and reacting to those would
+loop forever. A failed build is reported and the watch continues.
 
 ### Attributes
 

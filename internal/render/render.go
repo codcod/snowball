@@ -92,6 +92,18 @@ func (u *ui) buffered() (*ui, func()) {
 
 // Build renders every selected book to every selected format.
 func Build(cfg *config.Config, opts Options) error {
+	u := newUI(opts)
+	work, cleanup, err := prepMermaid(cfg, u)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	return build(cfg, opts, work, u)
+}
+
+// build is Build without the mermaid preflight, so watch mode can pay that cost
+// once instead of on every rebuild.
+func build(cfg *config.Config, opts Options, work mermaidWork, u *ui) error {
 	rev, date := revision.Resolve(cfg, opts.Rev, opts.Date)
 	formats := opts.Formats
 	if len(formats) == 0 {
@@ -101,13 +113,6 @@ func Build(cfg *config.Config, opts Options) error {
 	if len(books) == 0 {
 		return fmt.Errorf("no books matched")
 	}
-
-	u := newUI(opts)
-	work, cleanup, err := prepMermaid(cfg, u)
-	if err != nil {
-		return err
-	}
-	defer cleanup()
 
 	jobs := opts.Jobs
 	if jobs <= 0 {
