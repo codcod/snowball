@@ -50,7 +50,7 @@ brews:
   - name: snowball
     repository:
       owner: codcod
-      name: homebrew-taps
+      name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     homepage: "https://github.com/codcod/snowball"
     description: "Render AsciiDoc books to PDF/EPUB via the native asciidoctor toolchain"
