@@ -7,6 +7,7 @@ package toolchain
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -54,13 +55,13 @@ func Doctor() (reports []Report, ok bool) {
 	return reports, ok
 }
 
-// PrintReport writes a human-readable doctor summary to w-like stdout.
-func PrintReport(reports []Report) {
+// PrintReport writes a human-readable doctor summary to w.
+func PrintReport(w io.Writer, reports []Report) {
 	for _, r := range reports {
 		if r.Found {
-			fmt.Printf("  ok   %-12s %s\n", r.Tool.Name, r.Version)
+			fmt.Fprintf(w, "  ok   %-12s %s\n", r.Tool.Name, r.Version)
 		} else {
-			fmt.Printf("  MISS %-12s — %s\n", r.Tool.Name, r.Tool.Hint)
+			fmt.Fprintf(w, "  MISS %-12s — %s\n", r.Tool.Name, r.Tool.Hint)
 		}
 	}
 }

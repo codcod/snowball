@@ -1,6 +1,7 @@
 package toolchain
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"path/filepath"
@@ -201,7 +202,9 @@ func TestPrintReport(t *testing.T) {
 		{Tool: Tool{Name: "Ruby", Bin: "ruby", Hint: "brew install ruby"}, Found: true, Version: "ruby 3.4.1"},
 		{Tool: Tool{Name: "mermaid-cli", Bin: "mmdc", Hint: "run snowball setup"}, Found: false},
 	}
-	out := captureStdout(t, func() { PrintReport(reports) })
+	var buf bytes.Buffer
+	PrintReport(&buf, reports)
+	out := buf.String()
 
 	lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
 	if len(lines) != 2 {
@@ -216,8 +219,10 @@ func TestPrintReport(t *testing.T) {
 }
 
 func TestPrintReportEmpty(t *testing.T) {
-	if out := captureStdout(t, func() { PrintReport(nil) }); out != "" {
-		t.Errorf("PrintReport(nil) printed %q, want nothing", out)
+	var buf bytes.Buffer
+	PrintReport(&buf, nil)
+	if buf.Len() != 0 {
+		t.Errorf("PrintReport(nil) printed %q, want nothing", buf.String())
 	}
 }
 

@@ -108,7 +108,7 @@ func doctorCmd() *cobra.Command {
 		Short: "Verify the native toolchain is installed",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			reports, ok := toolchain.Doctor()
-			toolchain.PrintReport(reports)
+			toolchain.PrintReport(os.Stdout, reports)
 			if !ok {
 				return fmt.Errorf("toolchain incomplete — run `snowball setup`")
 			}
@@ -152,7 +152,7 @@ func initCmd() *cobra.Command {
 func requireToolchain() error {
 	reports, ok := toolchain.Doctor()
 	if !ok {
-		toolchain.PrintReport(reports)
+		toolchain.PrintReport(os.Stdout, reports)
 		return fmt.Errorf("toolchain incomplete — run `snowball setup`")
 	}
 	return nil
