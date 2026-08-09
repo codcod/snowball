@@ -20,17 +20,10 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: gofmt
-        run: |
-          unformatted="$(gofmt -l .)"
-          if [ -n "$unformatted" ]; then
-            echo "gofmt drift (run 'gofmt -w .'):"
-            echo "$unformatted"
-            exit 1
-          fi
+      - uses: extractions/setup-just@v4
 
-      - name: go vet
-        run: go vet ./...
+      - name: lint
+        run: just lint
 
       - name: build
         run: go build -ldflags "-X main.Version=ci" -o snowball ./cmd/snowball
