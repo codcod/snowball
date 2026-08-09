@@ -13,6 +13,10 @@ build:
 test:
     go test ./...
 
+# Static checks: formatting drift + go vet (parity with CI)
+lint: fmt-check
+    go vet ./...
+
 # Check formatting
 fmt-check:
     @unformatted="$(gofmt -l .)"; \

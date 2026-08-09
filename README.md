@@ -124,4 +124,5 @@ too; `snowball doctor` reports them but never installs them.
 ```sh
 just build   # -> ./snowball
 just test
+just lint    # gofmt drift + go vet, same static checks CI runs
 ```
