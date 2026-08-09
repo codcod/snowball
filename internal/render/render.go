@@ -395,8 +395,19 @@ func prepMermaid(cfg *config.Config, u *ui) (mermaidWork, func(), error) {
 }
 
 // bundleExec runs `bundle exec <args...>` with the snowball toolchain env.
+// The program name is resolved through toolchain.LookPath so a bundler
+// vendored into snowball's own cache (because it was missing from PATH at
+// `setup` time) is actually found — exec.Command resolves the program name
+// against the parent process's PATH, not against the child env renderEnv
+// builds, so a bare "bundle" here would not see it. When the lookup itself
+// fails, fall back to the bare name so the error the user sees is still
+// requireToolchain's "toolchain incomplete", not a lookup failure from here.
 func bundleExec(cfg *config.Config, u *ui, args ...string) error {
-	return u.run(cfg, "bundle", append([]string{"exec"}, args...)...)
+	bundle := "bundle"
+	if path, err := toolchain.LookPath("bundle"); err == nil {
+		bundle = path
+	}
+	return u.run(cfg, bundle, append([]string{"exec"}, args...)...)
 }
 
 // run executes a child process against the render environment, routing its
@@ -425,7 +436,13 @@ func (u *ui) run(cfg *config.Config, name string, args ...string) error {
 
 // renderEnv builds the child environment: point bundler at the snowball-owned
 // Gemfile (installed by `snowball setup`) and, on macOS, prefer Homebrew Ruby
-// over the system 2.6 shim — the same PATH shim the old justfile used.
+// over the system 2.6 shim — the same PATH shim the old justfile used. When
+// `setup` vendored bundler and the gem set into its own gem home (because
+// bundler was missing from PATH), also point GEM_HOME/GEM_PATH/PATH at it —
+// the same shared gem home toolchain.Setup owns end to end — but only when
+// the caller has not already set GEM_HOME themselves (an escape hatch, the
+// same idiom this function already applies to BUNDLE_GEMFILE), and preserving
+// (by prepending to, never replacing) any inherited GEM_PATH.
 func renderEnv(cfg *config.Config) []string {
 	env := os.Environ()
 	if _, err := os.Stat("/opt/homebrew/opt/ruby/bin"); err == nil && runtime.GOOS == "darwin" {
@@ -437,15 +454,38 @@ func renderEnv(cfg *config.Config) []string {
 			env = append(env, "BUNDLE_GEMFILE="+gemfile)
 		}
 	}
+	if gemDir, err := toolchain.GemDir(); err == nil {
+		// GemDir creates an empty "gems" dir on demand (mirroring cacheDir), so
+		// check for the bin/ subdirectory setup actually populates — the real
+		// signal that something was vendored there, the same way the
+		// BUNDLE_GEMFILE check above looks for the Gemfile rather than just the
+		// cache dir.
+		binDir := filepath.Join(gemDir, "bin")
+		if info, err := os.Stat(binDir); err == nil && info.IsDir() {
+			env = prependPath(env, binDir)
+			if os.Getenv("GEM_HOME") == "" {
+				env = append(env, "GEM_HOME="+gemDir)
+			}
+			env = prependEnvVar(env, "GEM_PATH", gemDir)
+		}
+	}
 	return env
 }
 
 func prependPath(env []string, dir string) []string {
+	return prependEnvVar(env, "PATH", dir)
+}
+
+// prependEnvVar prepends value to key's existing PATH-style (list) value in
+// env, preserving whatever was already there, or sets key=value when key was
+// absent.
+func prependEnvVar(env []string, key, value string) []string {
+	prefix := key + "="
 	for i, kv := range env {
-		if strings.HasPrefix(kv, "PATH=") {
-			env[i] = "PATH=" + dir + string(os.PathListSeparator) + kv[len("PATH="):]
+		if strings.HasPrefix(kv, prefix) {
+			env[i] = prefix + value + string(os.PathListSeparator) + kv[len(prefix):]
 			return env
 		}
 	}
-	return append(env, "PATH="+dir)
+	return append(env, prefix+value)
 }

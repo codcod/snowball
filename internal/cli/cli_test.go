@@ -83,7 +83,7 @@ func fakeToolchain(t *testing.T) string {
 	}
 	bin := t.TempDir()
 	t.Setenv("PATH", bin)
-	for _, name := range []string{"ruby", "bundle", "node", "mmdc", "npm"} {
+	for _, name := range []string{"ruby", "bundle", "node", "mmdc", "npm", "gem"} {
 		shimBin(t, bin, name, "echo '"+name+" 1.0.0'")
 	}
 	return bin
