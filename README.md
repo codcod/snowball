@@ -107,8 +107,10 @@ be told apart from hand-authored ones. `--cache` additionally drops the
 bundler, `mermaid-cli`, Puppeteer's Chrome — **including bundler itself**. A
 missing bundler is not your job to fix; `setup` bootstraps it with `gem install
 --no-document bundler`, and both bundler and the pinned gem set install into
-snowball's own cache (`~/.cache/snowball/toolchain/gems`, via `GEM_HOME`) —
-nothing is written outside it and nothing needs `sudo`.
+snowball's own cache — `snowball/toolchain/gems` under your user cache
+directory (`~/.cache` on Linux, `~/Library/Caches` on macOS,
+`%LocalAppData%` on Windows), pointed at with `GEM_HOME`. Nothing is written
+outside it and nothing needs `sudo`.
 
 `setup` does need **ruby**, **gem**, **node** and **npm** already on `PATH` —
 these stay the environment's job, and `setup` fails fast naming whichever one

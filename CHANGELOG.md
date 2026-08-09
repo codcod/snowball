@@ -22,9 +22,11 @@ While the version is below `1.0.0`, breaking changes may land in a minor release
 ### Changed
 
 - **The pinned gem set (and, when needed, bundler) now install into
-  snowball's own cache** (`~/.cache/snowball/toolchain/gems`, via `GEM_HOME`)
-  instead of wherever the ambient `gem`/`bundle` happened to point. Nothing is
-  written outside snowball's cache and nothing needs `sudo`. The first
+  snowball's own cache** (`snowball/toolchain/gems` under the user cache
+  directory — `~/.cache` on Linux, `~/Library/Caches` on macOS — via
+  `GEM_HOME`) instead of wherever the ambient `gem`/`bundle` happened to
+  point. Nothing is written outside snowball's cache and nothing needs
+  `sudo`. The first
   `snowball setup` after upgrading re-installs the gem set there.
 
 ## [0.2.1] - 2026-07-27
