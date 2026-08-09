@@ -8,6 +8,8 @@ While the version is below `1.0.0`, breaking changes may land in a minor release
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-08-09
+
 ### Fixed
 
 - **`snowball setup` failed with a raw `exec: "bundle": executable file not
@@ -25,9 +27,8 @@ While the version is below `1.0.0`, breaking changes may land in a minor release
   snowball's own cache** (`snowball/toolchain/gems` under the user cache
   directory — `~/.cache` on Linux, `~/Library/Caches` on macOS — via
   `GEM_HOME`) instead of wherever the ambient `gem`/`bundle` happened to
-  point. Nothing is written outside snowball's cache and nothing needs
-  `sudo`. The first
-  `snowball setup` after upgrading re-installs the gem set there.
+  point. Nothing is written outside snowball's cache and nothing needs `sudo`.
+  The first `snowball setup` after upgrading re-installs the gem set there.
 
 ## [0.2.1] - 2026-07-27
 
@@ -206,7 +207,8 @@ and EPUB by orchestrating the native asciidoctor toolchain, configured through
 `snowball.yaml`, with `build`, `check`, `doctor`, `setup`, `init` and `version`
 commands.
 
-[Unreleased]: https://github.com/codcod/snowball/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/codcod/snowball/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/codcod/snowball/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/codcod/snowball/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/codcod/snowball/compare/v0.1.4...v0.2.0
 [0.1.4]: https://github.com/codcod/snowball/compare/v0.1.3...v0.1.4
