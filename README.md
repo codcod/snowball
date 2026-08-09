@@ -103,10 +103,21 @@ be told apart from hand-authored ones. `--cache` additionally drops the
 
 ## Toolchain boundary
 
-`snowball setup` installs **language-level** deps only (asciidoctor gems via
-bundler, `mermaid-cli`, Puppeteer's Chrome). **OS-level** deps — Node.js and
-Chrome's shared libraries (`libnss3`, `libgtk-3-0`, `fonts-liberation`, …) — are
-the environment's job; `snowball doctor` reports them but never installs them.
+`snowball setup` installs **language-level** deps only: asciidoctor gems via
+bundler, `mermaid-cli`, Puppeteer's Chrome — **including bundler itself**. A
+missing bundler is not your job to fix; `setup` bootstraps it with `gem install
+--no-document bundler`, and both bundler and the pinned gem set install into
+snowball's own cache — `snowball/toolchain/gems` under your user cache
+directory (`~/.cache` on Linux, `~/Library/Caches` on macOS,
+`%LocalAppData%` on Windows), pointed at with `GEM_HOME`. Nothing is written
+outside it and nothing needs `sudo`.
+
+`setup` does need **ruby**, **gem**, **node** and **npm** already on `PATH` —
+these stay the environment's job, and `setup` fails fast naming whichever one
+is missing (never a raw `exec: "bundle": executable file not found` or
+similar). **OS-level** deps — Node.js itself and Chrome's shared libraries
+(`libnss3`, `libgtk-3-0`, `fonts-liberation`, …) — are the environment's job
+too; `snowball doctor` reports them but never installs them.
 
 ## Build
 

@@ -8,6 +8,27 @@ While the version is below `1.0.0`, breaking changes may land in a minor release
 
 ## [Unreleased]
 
+### Fixed
+
+- **`snowball setup` failed with a raw `exec: "bundle": executable file not
+  found in $PATH` when bundler was missing**, instead of an actionable error.
+  `setup` now preflights the tools it needs already present (ruby, gem, node,
+  npm) and fails naming whichever is missing; when bundler itself is missing
+  it bootstraps it with `gem install --no-document bundler` instead of
+  requiring the user to install it first. `snowball doctor` and `snowball
+  build`/`watch`/`check` now find a bootstrapped bundler too — previously a
+  vendored bundler would have been invisible to both.
+
+### Changed
+
+- **The pinned gem set (and, when needed, bundler) now install into
+  snowball's own cache** (`snowball/toolchain/gems` under the user cache
+  directory — `~/.cache` on Linux, `~/Library/Caches` on macOS — via
+  `GEM_HOME`) instead of wherever the ambient `gem`/`bundle` happened to
+  point. Nothing is written outside snowball's cache and nothing needs
+  `sudo`. The first
+  `snowball setup` after upgrading re-installs the gem set there.
+
 ## [0.2.1] - 2026-07-27
 
 ### Fixed

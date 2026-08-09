@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/codcod/snowball/internal/config"
+	"github.com/codcod/snowball/internal/toolchain"
 )
 
 // testConfig builds a config rooted at a temp dir with the given books, with
@@ -269,6 +270,104 @@ func TestRenderEnv(t *testing.T) {
 		}
 		if count != 1 {
 			t.Errorf("found %d BUNDLE_GEMFILE entries, want 1", count)
+		}
+	})
+
+	// The remaining sub-tests exercise the vendored-gem-home wiring: setup
+	// bootstraps bundler and the gem set into toolchain.GemDir() only when
+	// bundle was missing from PATH, and renderEnv must make the renderer see
+	// exactly that gem home — the same one — without ever losing an env var the
+	// caller already set.
+
+	t.Run("wires the vendored gem home into GEM_HOME, GEM_PATH and PATH", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
+		t.Setenv("GEM_HOME", "")
+		t.Setenv("GEM_PATH", "")
+
+		gemDir, err := toolchain.GemDir()
+		if err != nil {
+			t.Fatal(err)
+		}
+		binDir := filepath.Join(gemDir, "bin")
+		if err := os.MkdirAll(binDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		var gotGemHome, gotGemPath, gotPath string
+		for _, kv := range renderEnv(cfg) {
+			switch {
+			case strings.HasPrefix(kv, "GEM_HOME="):
+				gotGemHome = kv
+			case strings.HasPrefix(kv, "GEM_PATH="):
+				gotGemPath = kv
+			case strings.HasPrefix(kv, "PATH="):
+				gotPath = kv
+			}
+		}
+		if gotGemHome != "GEM_HOME="+gemDir {
+			t.Errorf("GEM_HOME = %q, want GEM_HOME=%s", gotGemHome, gemDir)
+		}
+		if !strings.Contains(gotGemPath, gemDir) {
+			t.Errorf("GEM_PATH = %q, want it to contain %s", gotGemPath, gemDir)
+		}
+		if !strings.HasPrefix(gotPath, "PATH="+binDir) {
+			t.Errorf("PATH = %q, want it to start with %s", gotPath, binDir)
+		}
+	})
+
+	t.Run("does not override an explicit GEM_HOME, but still prepends to GEM_PATH", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
+
+		gemDir, err := toolchain.GemDir()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(gemDir, "bin"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		t.Setenv("GEM_HOME", "/custom/gem-home")
+		t.Setenv("GEM_PATH", "/inherited/gem-path")
+
+		var gotGemHome, gotGemPath string
+		for _, kv := range renderEnv(cfg) {
+			switch {
+			case strings.HasPrefix(kv, "GEM_HOME="):
+				gotGemHome = kv
+			case strings.HasPrefix(kv, "GEM_PATH="):
+				gotGemPath = kv
+			}
+		}
+		if gotGemHome != "GEM_HOME=/custom/gem-home" {
+			t.Errorf("GEM_HOME = %q, want the caller's value untouched", gotGemHome)
+		}
+		wantGemPath := "GEM_PATH=" + gemDir + string(os.PathListSeparator) + "/inherited/gem-path"
+		if gotGemPath != wantGemPath {
+			t.Errorf("GEM_PATH = %q, want %q (prepended, not replaced)", gotGemPath, wantGemPath)
+		}
+	})
+
+	t.Run("does nothing when setup never vendored anything", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
+		t.Setenv("GEM_HOME", "")
+		t.Setenv("GEM_PATH", "")
+		// Deliberately do not create GemDir()'s bin/ subdirectory: a fresh cache
+		// dir (or one GemDir() itself just created, mirroring cacheDir's
+		// mkdir-on-lookup) must count as "nothing vendored", not "vendored".
+
+		for _, kv := range renderEnv(cfg) {
+			if strings.HasPrefix(kv, "GEM_HOME=") && kv != "GEM_HOME=" {
+				t.Errorf("renderEnv set %q with no vendored bundler present", kv)
+			}
+			if strings.HasPrefix(kv, "GEM_PATH=") && kv != "GEM_PATH=" {
+				t.Errorf("renderEnv set %q with no vendored bundler present", kv)
+			}
 		}
 	})
 }
@@ -567,7 +666,10 @@ func TestBuildOutputVerbosity(t *testing.T) {
 		if err := Build(newCfg(t), Options{Verbose: true, Out: &out, ErrOut: &errOut}); err != nil {
 			t.Fatalf("Build: %v", err)
 		}
-		if !strings.Contains(out.String(), "exec bundle exec asciidoctor-pdf") {
+		// bundleExec resolves "bundle" through toolchain.LookPath, so the logged
+		// program name is bundle's resolved (here: shimmed) path, not the bare
+		// literal "bundle" — assert on the part that does not vary with that path.
+		if !strings.Contains(out.String(), "bundle exec asciidoctor-pdf") {
 			t.Errorf("--verbose did not log the invocation: %q", out.String())
 		}
 	})
