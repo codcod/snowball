@@ -1,6 +1,7 @@
 package scaffold
 
 import (
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,6 +21,70 @@ func contains(list []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// --- sanitizeProjectName: a project name is interpolated, unquoted, into both
+// a filesystem path and a plain YAML scalar, so it must survive both uses ---
+
+func TestSanitizeProjectNameTable(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"plain", "demo", "demo"},
+		{"internal space", "my project", "my-project"},
+		{"path separators", "a/b\\c", "a-b-c"},
+		{"parent traversal", "../../etc/pwned", "etc-pwned"},
+		{"yaml colon-space", "foo: bar", "foo-bar"},
+		{"yaml comment hash", "a #comment", "a-comment"},
+		{"yaml quote", `"quoted"`, "quoted"},
+		{"embedded newline", "a\nb: c", "a-b-c"},
+		{"all whitespace", "   ", fallbackProject},
+		{"empty", "", fallbackProject},
+		{"all disallowed", "###", fallbackProject},
+		{"leading/trailing dash and dot", "-.demo.-", "demo"},
+		{"double dash preserved as one", "a--b", "a-b"},
+		{"dots and underscores allowed", "a_b.c", "a_b.c"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := sanitizeProjectName(c.in); got != c.want {
+				t.Errorf("sanitizeProjectName(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
+// TestScaffoldSurvivesYAMLUnsafeProjectName: a project name containing YAML
+// metacharacters must not produce a config that either fails to load, or
+// — worse — loads with a truncated
+// theme reference that silently reintroduces the theme-file-does-not-exist
+// defect (asciidoctor-pdf falls back to its default theme and still exits
+// non-zero, invisible to a check that only inspects the config, not a build).
+func TestScaffoldSurvivesYAMLUnsafeProjectName(t *testing.T) {
+	unsafe := []string{"foo: bar", "a #comment", `"quoted"`, "a\nb: c", "../../etc/pwned"}
+	for _, name := range unsafe {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			if _, err := Docs(root, Options{ProjectName: name}); err != nil {
+				t.Fatalf("Docs(%q): %v", name, err)
+			}
+			cfg, err := config.Load(filepath.Join(root, "snowball.yaml"))
+			if err != nil {
+				t.Fatalf("config with project name %q does not load: %v", name, err)
+			}
+			dir, themeName, ok := cfg.ThemeDirName()
+			if !ok {
+				t.Fatalf("project name %q: config sets no theme", name)
+			}
+			reloaded := filepath.Join(dir, themeName+"-theme.yml")
+			if _, err := os.Stat(reloaded); err != nil {
+				t.Errorf("project name %q: theme does not round-trip, asciidoctor-pdf would reload %s: %v",
+					name, reloaded, err)
+			}
+		})
+	}
 }
 
 // --- Tier 1: hermetic structural invariants, one per defect guarded against ---
@@ -159,6 +224,59 @@ func TestNoForeignProductNameInScaffoldOutput(t *testing.T) {
 	_ = res
 }
 
+// TestNoForeignProductNameAnywhereInRepo widens the invariant above: a
+// scaffold-output-only scan can stay green while a foreign product's own
+// name survives elsewhere in this repository's own source, including a
+// package doc comment. This test scans the whole tree's source/doc files,
+// not only what one command happens to generate.
+func TestNoForeignProductNameAnywhereInRepo(t *testing.T) {
+	root := repoRoot(t)
+
+	// This file's own diagnostic strings ("contains a foreign product name
+	// (ai-sdlc)", directly above and in this doc comment) name the term to
+	// talk about it, not to ship it, so this test excludes its own source
+	// file from the scan rather than tripping on itself.
+	selfPath, err := filepath.Abs("scaffold_test.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	extensions := map[string]bool{".go": true, ".md": true, ".yml": true, ".yaml": true, ".adoc": true}
+	skipDirs := map[string]bool{".git": true, "dist": true}
+
+	if err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if skipDirs[d.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !extensions[filepath.Ext(path)] {
+			return nil
+		}
+		abs, err := filepath.Abs(path)
+		if err != nil {
+			return err
+		}
+		if abs == selfPath {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(data), "ai-sdlc") {
+			t.Errorf("%s contains a foreign product name (ai-sdlc) — conventions.md § no workspace leakage", path)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // --- Behavioural coverage ---
 
 func TestDocsDefaultsProjectNameToRootBasename(t *testing.T) {
@@ -226,6 +344,36 @@ func TestDocsJustfileMissingIsSkippedNeverCreated(t *testing.T) {
 	}
 	if !contains(res.Skipped, "justfile") {
 		t.Errorf("Skipped = %v, want a justfile note", res.Skipped)
+	}
+}
+
+// TestDocsJustfileDetectsParameterisedRecipe: a recipe defined with
+// parameters or a default value (e.g. `docs-build DIR="dist":`) must still
+// be detected as "already defined", or scaffold appends a colliding second
+// definition under the same name and `just` refuses to parse the file at
+// all.
+func TestDocsJustfileDetectsParameterisedRecipe(t *testing.T) {
+	root := t.TempDir()
+	original := "docs-build DIR=\"dist\":\n    echo {{DIR}}\n"
+	if err := os.WriteFile(filepath.Join(root, "justfile"), []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Docs(root, Options{ProjectName: "demo"})
+	if err != nil {
+		t.Fatalf("Docs: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "justfile"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(got), "docs-build") != 1 {
+		t.Errorf("justfile = %q, want the parameterised docs-build left exactly as-is, not duplicated", got)
+	}
+	if !contains(res.Skipped, "docs-build") {
+		t.Errorf("Skipped = %v, want the parameterised docs-build reported as already defined", res.Skipped)
+	}
+	if !strings.Contains(string(got), `DIR="dist"`) {
+		t.Errorf("justfile = %q, want the original parameter default preserved verbatim", got)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/codcod/snowball/internal/config"
@@ -185,12 +186,20 @@ func appendJustfileRecipes(root string, dryRun bool, res *Result) error {
 }
 
 // hasRecipe reports whether justfile content already defines a recipe named
-// name — matched as a line starting with "<name>:", the same shape `just`
-// itself parses a recipe header as.
+// name. A `just` recipe header is the name at column 0, followed immediately
+// by either ":" (no parameters) or whitespace (one or more parameters,
+// optionally with defaults, e.g. `docs-build DIR="dist":`) before the colon
+// that ends the header. Matching only the bare "<name>:" form (as an earlier
+// version of this function did) misses every parameterised recipe, so a
+// justfile that already defines one under this name gets a second,
+// colliding definition appended — `just` then refuses to parse the whole
+// file. Anchoring to the start of the line also avoids a false match on
+// another recipe that merely lists name as a dependency (e.g.
+// `build: docs-check`).
 func hasRecipe(content, name string) bool {
-	prefix := name + ":"
+	header := regexp.MustCompile(`^` + regexp.QuoteMeta(name) + `(:|\s)`)
 	for _, line := range strings.Split(content, "\n") {
-		if strings.HasPrefix(line, prefix) {
+		if header.MatchString(line) {
 			return true
 		}
 	}

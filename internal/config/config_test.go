@@ -350,7 +350,7 @@ func TestThemeDirNameVariants(t *testing.T) {
 		theme    string
 		wantName string
 	}{
-		{"docs/pdf-theme/ai-sdlc-theme.yml", "ai-sdlc"},
+		{"docs/pdf-theme/my-project-theme.yml", "my-project"},
 		{"themes/basic.yml", "basic"},
 		{"themes/plain-theme.yml", "plain"},
 		{"themes/my-theme-theme.yml", "my-theme"},
@@ -381,7 +381,7 @@ func TestThemeDirNameAbsoluteTheme(t *testing.T) {
 }
 
 func TestThemeDirName(t *testing.T) {
-	p := writeConfig(t, "books:\n  - src: docs/m.adoc\ntheme: docs/pdf-theme/ai-sdlc-theme.yml\n")
+	p := writeConfig(t, "books:\n  - src: docs/m.adoc\ntheme: docs/pdf-theme/my-project-theme.yml\n")
 	c, err := Load(p)
 	if err != nil {
 		t.Fatal(err)
@@ -390,8 +390,8 @@ func TestThemeDirName(t *testing.T) {
 	if !ok {
 		t.Fatal("expected theme")
 	}
-	if name != "ai-sdlc" {
-		t.Errorf("theme name = %q, want ai-sdlc", name)
+	if name != "my-project" {
+		t.Errorf("theme name = %q, want my-project", name)
 	}
 	if filepath.Base(dir) != "pdf-theme" {
 		t.Errorf("theme dir = %q, want .../pdf-theme", dir)

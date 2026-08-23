@@ -127,7 +127,9 @@ nothing at all.
 
 `snowball init` remains the config-only command: it writes a starter
 `snowball.yaml` describing one book with no `theme:` key, for a repo that
-already has its own docs tree.
+already has its own docs tree. It also takes `--project-name` (default: the
+current directory's name), which names the book's `out:` —
+`<project-name>-user-manual` — the same naming `scaffold` uses.
 
 ### Cleaning
 

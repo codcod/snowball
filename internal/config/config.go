@@ -257,7 +257,7 @@ func (c *Config) Path(p string) string {
 // expects: pdf-themesdir=<dir> and pdf-theme=<name>, where the theme file is
 // <dir>/<name>-theme.yml. Returns ok=false when no theme is configured.
 //
-//	docs/pdf-theme/ai-sdlc-theme.yml -> ("docs/pdf-theme", "ai-sdlc", true)
+//	docs/pdf-theme/my-project-theme.yml -> ("docs/pdf-theme", "my-project", true)
 func (c *Config) ThemeDirName() (dir, name string, ok bool) {
 	if c.Theme == "" {
 		return "", "", false

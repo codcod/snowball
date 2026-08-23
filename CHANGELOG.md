@@ -18,6 +18,9 @@ While the version is below `1.0.0`, breaking changes may land in a minor release
   (`--no-workflow` to skip it). It supports `--project-name`, `--force` and
   `--dry-run`; a dry run writes nothing at all. `snowball check` and
   `snowball build` both succeed immediately on the scaffolded tree.
+- **`snowball init --project-name`**: names the book in the starter config it
+  writes (default: the current directory's name), for symmetry with
+  `scaffold`.
 
 ### Changed
 
@@ -28,6 +31,10 @@ While the version is below `1.0.0`, breaking changes may land in a minor release
   the missing theme file made asciidoctor-pdf silently fall back to its
   built-in theme while still exiting non-zero. Existing `snowball.yaml`
   files are unaffected; this changes only what a fresh `init` writes.
+- **The book's `out:` in `init`'s starter config is now `<project-name>-user-manual`**
+  (previously the fixed `users-manual`), matching the name `scaffold` has
+  always used and making the output filename depend on the project rather
+  than being the same for every fresh `init`.
 
 ## [0.2.2] - 2026-08-09
 

@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -32,14 +33,37 @@ const (
 	fallbackProject = "project"     // used when a sanitised project name would be empty
 )
 
-// sanitizeProjectName makes name safe to use as a filesystem path segment: no
-// separators, no leading/trailing whitespace, and never empty. A project name
-// containing "/" or "\\" must never let a generated path escape the scaffold
-// root, and an all-whitespace name must not produce an unusable filename.
+// disallowedInProjectName matches any run of characters that may not survive
+// into a filesystem path segment or a plain (unquoted) YAML scalar. A
+// project name is interpolated, unquoted, straight into generated YAML
+// (StarterConfig) and into a generated filename (themeFileName) — a ":",
+// "#", quote or newline in either position produces a snowball.yaml that
+// either fails to parse, or — worse — parses with a truncated value and
+// silently reintroduces the theme-file-does-not-exist failure: a
+// project name of `a #comment` turns the rest of the theme: line into a
+// YAML comment, so the config loads, `check` passes, and only `build` fails
+// with asciidoctor-pdf's silent fall-back-but-exit-non-zero behaviour.
+// Restricting to a conservative, always-safe set closes both failure modes
+// at once, rather than chasing individual metacharacters for each consumer
+// (path vs. YAML) separately.
+var disallowedInProjectName = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
+
+// collapseDashes folds any run of two or more "-" (pre-existing or produced
+// by disallowedInProjectName above) into one, so a name like "a  b" or
+// "a--b" does not leave a visually confusing multi-dash scar.
+var collapseDashes = regexp.MustCompile(`-{2,}`)
+
+// sanitizeProjectName makes name safe to use both as a filesystem path
+// segment and as an unquoted plain YAML scalar: only [A-Za-z0-9._-] survive,
+// runs of anything else collapse to a single "-", leading/trailing "-" and
+// "." are trimmed (a leading "." would scaffold a hidden file; a leading
+// "-" reads like a flag in some contexts), and an all-invalid or
+// all-whitespace name never produces an empty result.
 func sanitizeProjectName(name string) string {
 	name = strings.TrimSpace(name)
-	name = strings.ReplaceAll(name, "/", "-")
-	name = strings.ReplaceAll(name, "\\", "-")
+	name = disallowedInProjectName.ReplaceAllString(name, "-")
+	name = collapseDashes.ReplaceAllString(name, "-")
+	name = strings.Trim(name, "-.")
 	if name == "" {
 		return fallbackProject
 	}
