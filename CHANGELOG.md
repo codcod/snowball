@@ -21,6 +21,10 @@ While the version is below `1.0.0`, breaking changes may land in a minor release
 - **`snowball init --project-name`**: names the book in the starter config it
   writes (default: the current directory's name), for symmetry with
   `scaffold`.
+- **`snowball docs-prompt`**: prints a self-contained prompt to stdout. An AI
+  coding agent can use it to replace `scaffold`'s placeholder docs content with
+  real, project-specific content. The prompt names the scaffolded files, the
+  placeholder markers to remove, and what "done" looks like.
 
 ### Changed
 

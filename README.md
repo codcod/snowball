@@ -12,6 +12,7 @@ EPUB), just one command instead of many. No docker.
 
 ```sh
 snowball scaffold    # lay down a starter docs skeleton + snowball.yaml (new repo, no docs yet)
+snowball docs-prompt # print a prompt for an AI agent to fill the scaffolded docs with real content
 snowball init        # write a starter snowball.yaml only (docs tree already exists)
 snowball setup       # install the pinned toolchain (gems + mermaid-cli + Chrome)
 snowball doctor      # verify everything is present

@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -190,6 +191,45 @@ func TestInitForceOverwrites(t *testing.T) {
 	}
 	if _, err := config.Load(config.DefaultFile); err != nil {
 		t.Errorf("init --force wrote a config that does not load: %v\n%s", err, body)
+	}
+}
+
+func TestDocsPromptPrintsPlaceholderGuidance(t *testing.T) {
+	out := captureStdout(t, func() {
+		if _, err := runCmd(t, docsPromptCmd()); err != nil {
+			t.Fatalf("docs-prompt: %v", err)
+		}
+	})
+	if !strings.Contains(out, "docs/user-manual/introduction.adoc") {
+		t.Errorf("docs-prompt output does not name docs/user-manual/introduction.adoc:\n%s", out)
+	}
+	if !strings.Contains(out, "TODO: replace this placeholder chapter") {
+		t.Errorf("docs-prompt output does not name the chapter TODO marker:\n%s", out)
+	}
+	// The prompt ships to users, so it must carry no trace of the workspace
+	// this project is developed in: no workspace name, and no id from the
+	// tracker the work is planned in.
+	//
+	// Whole words, not substrings — a substring scan fails the build on
+	// "community" or "opportunity".
+	//
+	// The id pattern is anchored on this project's own prefix rather than a
+	// general "<CAPS>-<digits>" shape, and holds no literal id (spelling one
+	// out here would be the very leak this list exists to catch). A general
+	// shape needs the false positives ruled out one at a time and still gets
+	// them wrong: "<CAPS>-<digits>" matches "UTF-8" and "EPUB-3", and
+	// requiring three or more digits to exclude those then matches
+	// "ISO-8601" — all three plausible in a prompt about rendering documents.
+	// The prefix admits no such collision.
+	leakPatterns := []*regexp.Regexp{
+		regexp.MustCompile(`(?i)\bunity\b`),
+		regexp.MustCompile(`(?i)\btranslator\b`),
+		regexp.MustCompile(`(?i)\bsnow-\d+\b`),
+	}
+	for _, p := range leakPatterns {
+		if m := p.FindString(out); m != "" {
+			t.Errorf("docs-prompt output leaks workspace text %q (pattern %s):\n%s", m, p, out)
+		}
 	}
 }
 
@@ -479,7 +519,7 @@ func TestExecuteRegistersEveryCommand(t *testing.T) {
 			t.Fatalf("Execute --help: %v", err)
 		}
 	})
-	for _, name := range []string{"build", "check", "doctor", "setup", "init", "scaffold", "version"} {
+	for _, name := range []string{"build", "check", "doctor", "setup", "init", "scaffold", "docs-prompt", "version"} {
 		if !strings.Contains(out, name) {
 			t.Errorf("--help does not list the %q command\n%s", name, out)
 		}

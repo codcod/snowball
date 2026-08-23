@@ -54,7 +54,7 @@ func newRoot(version string) (*cobra.Command, *globals) {
 	root.PersistentFlags().BoolVar(&g.verbose, "verbose", false,
 		"log every command snowball runs")
 
-	root.AddCommand(buildCmd(g), watchCmd(g), checkCmd(g), cleanCmd(g), doctorCmd(), setupCmd(), initCmd(), scaffoldCmd(), versionCmd(version))
+	root.AddCommand(buildCmd(g), watchCmd(g), checkCmd(g), cleanCmd(g), doctorCmd(), setupCmd(), initCmd(), scaffoldCmd(), docsPromptCmd(), versionCmd(version))
 	return root, g
 }
 
@@ -307,6 +307,21 @@ func scaffoldCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "list what would be created/changed, changing nothing")
 	cmd.Flags().BoolVar(&noWorkflow, "no-workflow", false, "skip writing the GitHub release-attach workflow")
 	return cmd
+}
+
+func docsPromptCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "docs-prompt",
+		Short: "Print a prompt an AI coding agent can use to fill scaffolded docs placeholders with real content",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			data, err := scaffold.Prompt()
+			if err != nil {
+				return err
+			}
+			fmt.Print(string(data))
+			return nil
+		},
+	}
 }
 
 // requireToolchain runs doctor before a render so a missing dependency fails fast.
