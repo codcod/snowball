@@ -8,6 +8,34 @@ While the version is below `1.0.0`, breaking changes may land in a minor release
 
 ## [Unreleased]
 
+### Added
+
+- **`snowball scaffold`**: lays down a minimal AsciiDoc docs skeleton
+  (`docs/user-manual.adoc` + one placeholder chapter + shared attributes), a
+  matching PDF theme, a generated `snowball.yaml`, additive `docs-check`/
+  `docs-build` justfile recipes (only appended to an existing justfile — it
+  never creates one), and a GitHub-only release-attach workflow
+  (`--no-workflow` to skip it). It supports `--project-name`, `--force` and
+  `--dry-run`; a dry run writes nothing at all. `snowball check` and
+  `snowball build` both succeed immediately on the scaffolded tree.
+- **`snowball init --project-name`**: names the book in the starter config it
+  writes (default: the current directory's name), for symmetry with
+  `scaffold`.
+
+### Changed
+
+- **`snowball init`'s starter config now describes exactly one book and sets
+  no `theme:` key**, instead of referencing a second book and a PDF theme
+  file that `init` never creates. The previous default failed `snowball
+  check`/`build` immediately. The missing second book was a hard error, and
+  the missing theme file made asciidoctor-pdf silently fall back to its
+  built-in theme while still exiting non-zero. Existing `snowball.yaml`
+  files are unaffected; this changes only what a fresh `init` writes.
+- **The book's `out:` in `init`'s starter config is now `<project-name>-user-manual`**
+  (previously the fixed `users-manual`), matching the name `scaffold` has
+  always used and making the output filename depend on the project rather
+  than being the same for every fresh `init`.
+
 ## [0.2.2] - 2026-08-09
 
 ### Fixed

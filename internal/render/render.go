@@ -1,6 +1,6 @@
 // Package render orchestrates the native asciidoctor toolchain to produce PDF and
-// EPUB books, and to validate them (check). It reproduces the exact invocations
-// ai-sdlc's justfile/CI used today: a mermaid puppeteer config passed as a
+// EPUB books, and to validate them (check). It reproduces the invocations a
+// hand-written justfile/CI would use: a mermaid puppeteer config passed as a
 // document attribute, an mmdc smoke-render preflight, per-format failure levels,
 // and PDF-only theme wiring.
 package render
