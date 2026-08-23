@@ -27,7 +27,7 @@ reference at the bottom following the existing pattern:
 Reconcile the entries by hand against what actually shipped since the last tag:
 
 ```sh
-git log v0.2.2..HEAD --oneline
+git log "$(git describe --tags --abbrev=0)..HEAD" --oneline
 ```
 
 Every user-visible change should already have an entry. If a change altered behaviour and
@@ -37,8 +37,8 @@ left the changelog untouched, it was not finished. Commit the stamp, so the tag 
 [`release`](.github/workflows/release.yml) workflow runs goreleaser on any `v*` tag.
 
 ```sh
-git tag v0.2.3
-git push origin v0.2.3
+git tag vX.Y.Z
+git push origin vX.Y.Z
 ```
 
 The version is stamped into the binary via `-ldflags -X main.Version={{ .Version }}`. Never
@@ -81,6 +81,33 @@ goreleaser check                       # is .goreleaser.yaml valid?
 goreleaser release --snapshot --clean  # cross-compile into ./dist, upload nothing
 ```
 
+> **`goreleaser check` currently exits non-zero, and that is expected.** It reports
+> `configuration is valid, but uses deprecated properties` — the `brews:` block, which
+> GoReleaser deprecated in favour of `homebrew_casks`. The configuration still works: releases
+> up to and including `v0.3.0` published their formula from it. Read a `check` failure by
+> looking at *which* line failed — a deprecation notice is known, anything else is not. This
+> will stop being merely a warning whenever GoReleaser removes the key, and the release
+> workflow tracks the latest v2 (`version: "~> v2"`), so the break will arrive on GoReleaser's
+> schedule rather than on a change made here.
+
+> **Unset `GITLAB_TOKEN` before running goreleaser locally.** GoReleaser picks its forge from
+> the environment, so a `GITLAB_TOKEN` or `GITLAB_PERSONAL_ACCESS_TOKEN` left set for some
+> other project makes it treat this repository as GitLab-hosted and generate a Homebrew
+> formula whose download URLs point at `gitlab.com/codcod/snowball` — a repository that does
+> not exist. It is harmless under `--snapshot`, which uploads nothing, but a local
+> non-snapshot run would publish a formula that fails for every user. CI is unaffected (it
+> sets no GitLab token), and the tap is correct today. When in doubt:
+>
+> ```sh
+> env -u GITLAB_TOKEN -u GITLAB_PERSONAL_ACCESS_TOKEN goreleaser release --snapshot --clean
+> ```
+>
+> Then confirm the generated formula points where you expect:
+>
+> ```sh
+> grep -o 'url "https://[^/]*' dist/homebrew/snowball.rb | sort -u   # expect github.com
+> ```
+
 Run the ordinary gates before tagging, too — CI runs the same static checks plus a build,
 the test suite, and a `version`/`--help` smoke:
 
@@ -91,7 +118,7 @@ just build && just test && just lint
 ## What the release depends on
 
 - **`HOMEBREW_TAP_GITHUB_TOKEN`** — a repository secret on `codcod/snowball`: a PAT with
-  `repo` scope on `codcod/homebrew-tap`. Confirmed working; every release through `v0.2.2`
+  `repo` scope on `codcod/homebrew-tap`. Confirmed working; every release through `v0.3.0`
   published its formula with it. An expired token is the most likely cause of a release that
   builds fine but never reaches the tap.
 - **`GITHUB_TOKEN`** — provided automatically by Actions; the workflow grants it
