@@ -46,6 +46,14 @@ func TestSanitizeProjectNameTable(t *testing.T) {
 		{"leading/trailing dash and dot", "-.demo.-", "demo"},
 		{"double dash preserved as one", "a--b", "a-b"},
 		{"dots and underscores allowed", "a_b.c", "a_b.c"},
+		// Non-ASCII letters are legal in both a filename and a plain YAML
+		// scalar and were never part of the hazard this function guards
+		// against — an earlier ASCII-only version of it discarded them
+		// anyway, mangling the scaffolded book's own cover title.
+		{"accented latin preserved", "café", "café"},
+		{"cyrillic preserved", "проект", "проект"},
+		{"cjk preserved", "日本語", "日本語"},
+		{"unicode mixed with a dangerous character", "café: bar", "café-bar"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -347,33 +355,47 @@ func TestDocsJustfileMissingIsSkippedNeverCreated(t *testing.T) {
 	}
 }
 
-// TestDocsJustfileDetectsParameterisedRecipe: a recipe defined with
-// parameters or a default value (e.g. `docs-build DIR="dist":`) must still
-// be detected as "already defined", or scaffold appends a colliding second
-// definition under the same name and `just` refuses to parse the file at
-// all.
-func TestDocsJustfileDetectsParameterisedRecipe(t *testing.T) {
-	root := t.TempDir()
-	original := "docs-build DIR=\"dist\":\n    echo {{DIR}}\n"
-	if err := os.WriteFile(filepath.Join(root, "justfile"), []byte(original), 0o644); err != nil {
-		t.Fatal(err)
+// TestDocsJustfileDetectsRecipeVariants: any legal `just` recipe header form
+// under a name scaffold also wants to append — with parameters, a default
+// value, or the "@" quiet modifier — must be detected as "already defined",
+// or scaffold appends a colliding second definition under the same name and
+// `just` refuses to parse the file at all, while still reporting success.
+// Two variants found this way, in two separate rounds: the parameterised
+// form first, then "@"-prefixed recipes once the parameterised fix shipped.
+func TestDocsJustfileDetectsRecipeVariants(t *testing.T) {
+	cases := []struct {
+		name     string
+		header   string
+		contains string // a fragment of the original header that must survive verbatim
+	}{
+		{"parameterised with default", `docs-build DIR="dist":`, `DIR="dist"`},
+		{"quiet modifier", `@docs-build:`, `@docs-build:`},
 	}
-	res, err := Docs(root, Options{ProjectName: "demo"})
-	if err != nil {
-		t.Fatalf("Docs: %v", err)
-	}
-	got, err := os.ReadFile(filepath.Join(root, "justfile"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Count(string(got), "docs-build") != 1 {
-		t.Errorf("justfile = %q, want the parameterised docs-build left exactly as-is, not duplicated", got)
-	}
-	if !contains(res.Skipped, "docs-build") {
-		t.Errorf("Skipped = %v, want the parameterised docs-build reported as already defined", res.Skipped)
-	}
-	if !strings.Contains(string(got), `DIR="dist"`) {
-		t.Errorf("justfile = %q, want the original parameter default preserved verbatim", got)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			root := t.TempDir()
+			original := c.header + "\n    echo body\n"
+			if err := os.WriteFile(filepath.Join(root, "justfile"), []byte(original), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			res, err := Docs(root, Options{ProjectName: "demo"})
+			if err != nil {
+				t.Fatalf("Docs: %v", err)
+			}
+			got, err := os.ReadFile(filepath.Join(root, "justfile"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Count(string(got), "docs-build") != 1 {
+				t.Errorf("justfile = %q, want the existing docs-build left exactly as-is, not duplicated", got)
+			}
+			if !contains(res.Skipped, "docs-build") {
+				t.Errorf("Skipped = %v, want docs-build reported as already defined", res.Skipped)
+			}
+			if !strings.Contains(string(got), c.contains) {
+				t.Errorf("justfile = %q, want the original header preserved verbatim", got)
+			}
+		})
 	}
 }
 
@@ -479,6 +501,35 @@ func TestScaffoldEndToEndCheckAndBuild(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(out, "demo-user-manual.epub")); err != nil {
 		t.Errorf("no EPUB produced: %v", err)
+	}
+}
+
+// TestScaffoldEndToEndNonASCIIProjectName confirms a non-ASCII project name
+// survives all the way through a real check/build, not merely through
+// sanitizeProjectName in isolation — the failure this guards against would
+// have shown as a mangled output filename, not a non-zero exit.
+func TestScaffoldEndToEndNonASCIIProjectName(t *testing.T) {
+	if _, ok := toolchain.Doctor(); !ok {
+		t.Skip("toolchain not present — skipping end-to-end scaffold check/build")
+	}
+
+	bin := buildSnowball(t)
+	root := t.TempDir()
+	name := "café"
+	if _, err := Docs(root, Options{ProjectName: name}); err != nil {
+		t.Fatalf("Docs: %v", err)
+	}
+
+	runSnowball(t, bin, root, "check")
+
+	out := filepath.Join(root, "dist", "docs")
+	runSnowball(t, bin, root, "build", "-o", out)
+
+	if _, err := os.Stat(filepath.Join(out, name+"-user-manual.pdf")); err != nil {
+		t.Errorf("no PDF produced with the expected non-ASCII filename: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(out, name+"-user-manual.epub")); err != nil {
+		t.Errorf("no EPUB produced with the expected non-ASCII filename: %v", err)
 	}
 }
 

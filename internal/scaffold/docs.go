@@ -186,18 +186,23 @@ func appendJustfileRecipes(root string, dryRun bool, res *Result) error {
 }
 
 // hasRecipe reports whether justfile content already defines a recipe named
-// name. A `just` recipe header is the name at column 0, followed immediately
-// by either ":" (no parameters) or whitespace (one or more parameters,
-// optionally with defaults, e.g. `docs-build DIR="dist":`) before the colon
-// that ends the header. Matching only the bare "<name>:" form (as an earlier
-// version of this function did) misses every parameterised recipe, so a
-// justfile that already defines one under this name gets a second,
-// colliding definition appended — `just` then refuses to parse the whole
-// file. Anchoring to the start of the line also avoids a false match on
-// another recipe that merely lists name as a dependency (e.g.
-// `build: docs-check`).
+// name. A `just` recipe header is an optional "@" quiet modifier, then the
+// name at column 0, followed immediately by either ":" (no parameters) or
+// whitespace (one or more parameters, optionally with defaults, e.g.
+// `docs-build DIR="dist":`, or `@docs-build:`) before the colon that ends
+// the header. Matching only the bare "<name>:" form misses every
+// parameterised or quiet recipe, so a justfile that already defines one
+// under this name gets a second, colliding definition appended — `just`
+// then refuses to parse the whole file. Anchoring to the start of the line
+// also avoids a false match on another recipe that merely lists name as a
+// dependency (e.g. `build: docs-check`).
 func hasRecipe(content, name string) bool {
-	header := regexp.MustCompile(`^` + regexp.QuoteMeta(name) + `(:|\s)`)
+	// "@" is a legal recipe-level quiet modifier directly before the name
+	// (`@docs-build:`), suppressing command echo for every line in the
+	// recipe. It was missed by an earlier version of this pattern, which
+	// let scaffold append a colliding duplicate under the same name and
+	// leave `just` unable to parse the file, while still reporting success.
+	header := regexp.MustCompile(`^@?` + regexp.QuoteMeta(name) + `(:|\s)`)
 	for _, line := range strings.Split(content, "\n") {
 		if header.MatchString(line) {
 			return true

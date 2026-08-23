@@ -37,16 +37,26 @@ const (
 // into a filesystem path segment or a plain (unquoted) YAML scalar. A
 // project name is interpolated, unquoted, straight into generated YAML
 // (StarterConfig) and into a generated filename (themeFileName) — a ":",
-// "#", quote or newline in either position produces a snowball.yaml that
-// either fails to parse, or — worse — parses with a truncated value and
-// silently reintroduces the theme-file-does-not-exist failure: a
-// project name of `a #comment` turns the rest of the theme: line into a
-// YAML comment, so the config loads, `check` passes, and only `build` fails
-// with asciidoctor-pdf's silent fall-back-but-exit-non-zero behaviour.
-// Restricting to a conservative, always-safe set closes both failure modes
-// at once, rather than chasing individual metacharacters for each consumer
-// (path vs. YAML) separately.
-var disallowedInProjectName = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
+// "#", quote, newline or path separator in either position produces a
+// snowball.yaml that either fails to parse, or — worse — parses with a
+// truncated value and silently reintroduces the theme-file-does-not-exist
+// failure: a project name of `a #comment` turns the rest of the theme: line
+// into a YAML comment, so the config loads, `check` passes, and only
+// `build` fails with asciidoctor-pdf's silent fall-back-but-exit-non-zero
+// behaviour.
+//
+// The allowed set is deliberately Unicode-aware (\p{L} letters, \p{N}
+// numbers, \p{M} combining marks, plus ".", "_", "-") rather than
+// ASCII-only: an earlier, ASCII-only version of this pattern was safe but
+// over-corrected, silently mangling every non-ASCII project name ("café"
+// → "caf", "проект" → the empty-name fallback) even though a name is not
+// merely a filename here — it is also substituted into the scaffolded book
+// master's title, so the mangling landed on the rendered manual's own cover
+// page. None of the YAML/filesystem metacharacters this pattern exists to
+// stop (":", "#", quotes, newlines, "/", "\\") are letters, numbers or
+// marks, so widening the allowed set to Unicode text does not reopen either
+// failure mode — it only stops discarding text that was never the problem.
+var disallowedInProjectName = regexp.MustCompile(`[^\p{L}\p{N}\p{M}._-]+`)
 
 // collapseDashes folds any run of two or more "-" (pre-existing or produced
 // by disallowedInProjectName above) into one, so a name like "a  b" or
@@ -54,11 +64,13 @@ var disallowedInProjectName = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 var collapseDashes = regexp.MustCompile(`-{2,}`)
 
 // sanitizeProjectName makes name safe to use both as a filesystem path
-// segment and as an unquoted plain YAML scalar: only [A-Za-z0-9._-] survive,
-// runs of anything else collapse to a single "-", leading/trailing "-" and
-// "." are trimmed (a leading "." would scaffold a hidden file; a leading
-// "-" reads like a flag in some contexts), and an all-invalid or
-// all-whitespace name never produces an empty result.
+// segment and as an unquoted plain YAML scalar: Unicode letters, numbers,
+// marks, ".", "_" and "-" survive; runs of anything else (path separators,
+// YAML metacharacters, whitespace, control characters) collapse to a single
+// "-"; leading/trailing "-" and "." are trimmed (a leading "." would
+// scaffold a hidden file; a leading "-" reads like a flag in some
+// contexts); and an all-invalid or all-whitespace name never produces an
+// empty result.
 func sanitizeProjectName(name string) string {
 	name = strings.TrimSpace(name)
 	name = disallowedInProjectName.ReplaceAllString(name, "-")
