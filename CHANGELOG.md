@@ -8,6 +8,8 @@ While the version is below `1.0.0`, breaking changes may land in a minor release
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-23
+
 ### Added
 
 - **`snowball scaffold`**: lays down a minimal AsciiDoc docs skeleton
@@ -240,6 +242,7 @@ and EPUB by orchestrating the native asciidoctor toolchain, configured through
 commands.
 
 [Unreleased]: https://github.com/codcod/snowball/compare/v0.2.2...HEAD
+[0.3.0]: https://github.com/codcod/snowball/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/codcod/snowball/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/codcod/snowball/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/codcod/snowball/compare/v0.1.4...v0.2.0
