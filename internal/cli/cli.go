@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/spf13/cobra"
 
 	"github.com/codcod/snowball/internal/config"
 	"github.com/codcod/snowball/internal/render"
+	"github.com/codcod/snowball/internal/scaffold"
 	"github.com/codcod/snowball/internal/toolchain"
 )
 
@@ -52,7 +54,7 @@ func newRoot(version string) (*cobra.Command, *globals) {
 	root.PersistentFlags().BoolVar(&g.verbose, "verbose", false,
 		"log every command snowball runs")
 
-	root.AddCommand(buildCmd(g), watchCmd(g), checkCmd(g), cleanCmd(g), doctorCmd(), setupCmd(), initCmd(), versionCmd(version))
+	root.AddCommand(buildCmd(g), watchCmd(g), checkCmd(g), cleanCmd(g), doctorCmd(), setupCmd(), initCmd(), scaffoldCmd(), versionCmd(version))
 	return root, g
 }
 
@@ -241,6 +243,7 @@ func setupCmd() *cobra.Command {
 
 func initCmd() *cobra.Command {
 	var force bool
+	var projectName string
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Write a starter snowball.yaml in the current directory",
@@ -248,7 +251,13 @@ func initCmd() *cobra.Command {
 			if _, err := os.Stat(config.DefaultFile); err == nil && !force {
 				return fmt.Errorf("%s already exists (use --force to overwrite)", config.DefaultFile)
 			}
-			if err := os.WriteFile(config.DefaultFile, []byte(starterConfig), 0o644); err != nil {
+			name := projectName
+			if name == "" {
+				if wd, err := os.Getwd(); err == nil {
+					name = filepath.Base(wd)
+				}
+			}
+			if err := os.WriteFile(config.DefaultFile, scaffold.StarterConfig(name, false), 0o644); err != nil {
 				return err
 			}
 			fmt.Printf("snowball: wrote %s\n", config.DefaultFile)
@@ -256,6 +265,47 @@ func initCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "overwrite an existing snowball.yaml")
+	cmd.Flags().StringVar(&projectName, "project-name", "", "name substituted into the starter config (default: the current directory's name)")
+	return cmd
+}
+
+func scaffoldCmd() *cobra.Command {
+	var (
+		projectName string
+		force       bool
+		dryRun      bool
+		noWorkflow  bool
+	)
+	cmd := &cobra.Command{
+		Use:   "scaffold",
+		Short: "Lay down a starter AsciiDoc docs skeleton, snowball.yaml, justfile recipes and a GitHub release-attach workflow",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			root, err := os.Getwd()
+			if err != nil {
+				return err
+			}
+			res, err := scaffold.Docs(root, scaffold.Options{
+				ProjectName: projectName,
+				Force:       force,
+				DryRun:      dryRun,
+				NoWorkflow:  noWorkflow,
+			})
+			for _, c := range res.Created {
+				fmt.Printf("  + %s\n", c)
+			}
+			for _, s := range res.Skipped {
+				fmt.Printf("  = %s\n", s)
+			}
+			for _, n := range res.Notes {
+				fmt.Printf("\n%s\n", n)
+			}
+			return err
+		},
+	}
+	cmd.Flags().StringVar(&projectName, "project-name", "", "name substituted into the scaffolded docs (default: the current directory's name)")
+	cmd.Flags().BoolVar(&force, "force", false, "overwrite files that already exist")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "list what would be created/changed, changing nothing")
+	cmd.Flags().BoolVar(&noWorkflow, "no-workflow", false, "skip writing the GitHub release-attach workflow")
 	return cmd
 }
 
@@ -268,25 +318,3 @@ func requireToolchain() error {
 	}
 	return nil
 }
-
-const starterConfig = `books:
-  - src: docs/user-manual.adoc
-    out: users-manual
-  - src: docs/developer-handbook.adoc
-    out: developers-handbook
-theme: docs/pdf-theme/ai-sdlc-theme.yml
-attributes:
-  toc: left
-  sectnums: ""
-formats: [pdf, epub]
-revision:
-  from: git-describe
-  date-format: "%d %B %Y"
-mermaid:
-  format: png
-  puppeteer-args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
-failure-level:
-  pdf: WARN
-  epub: ERROR
-  check: WARN
-`

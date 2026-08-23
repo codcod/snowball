@@ -11,7 +11,8 @@ EPUB), just one command instead of many. No docker.
 ## Quick start
 
 ```sh
-snowball init        # write a starter snowball.yaml
+snowball scaffold    # lay down a starter docs skeleton + snowball.yaml (new repo, no docs yet)
+snowball init        # write a starter snowball.yaml only (docs tree already exists)
 snowball setup       # install the pinned toolchain (gems + mermaid-cli + Chrome)
 snowball doctor      # verify everything is present
 snowball build       # render PDFs + EPUBs per snowball.yaml
@@ -28,7 +29,7 @@ books:
     out: users-manual
   - src: docs/developer-handbook.adoc
     out: developers-handbook
-theme: docs/pdf-theme/ai-sdlc-theme.yml   # PDF only; -> pdf-themesdir + pdf-theme
+theme: docs/pdf-theme/my-project-theme.yml   # PDF only; -> pdf-themesdir + pdf-theme
 attributes:                                # passed to every render as -a flags
   toc: left                                #   -a toc=left
   sectnums: ""                             #   -a sectnums       (set, no value)
@@ -91,6 +92,42 @@ rejected here rather than silently overwritten; use `revision`, `mermaid` and
 > `attributes` previously took a path to a shared `.adoc` file, but was never
 > passed to asciidoctor. That form is now a load error; to include a shared file,
 > use `include::docs/attributes.adoc[]` in the book master.
+
+`theme` is optional — a config with no `theme:` key is valid and renders with
+asciidoctor-pdf's built-in default theme. When you do set one, the file's name
+**must end in `-theme.yml`**. snowball derives the theme *name* by stripping
+`.yml` and then `-theme` from the configured file, and asciidoctor-pdf reloads
+`<dir>/<name>-theme.yml` from that derived name. A differently-suffixed file
+does not round-trip, and the failure is easy to miss: asciidoctor-pdf falls
+back to its built-in theme and still produces a PDF, but the command still
+exits non-zero.
+
+### Scaffolding
+
+`snowball scaffold` lays down a starting point for a repo with no docs yet:
+
+```sh
+snowball scaffold --project-name my-project
+```
+
+It writes a one-book AsciiDoc skeleton (`docs/user-manual.adoc` plus a
+placeholder `docs/user-manual/introduction.adoc` chapter and
+`docs/attributes.adoc`), a matching PDF theme
+(`docs/pdf-theme/<project>-theme.yml`), and a `snowball.yaml` that already
+points at all of it, so `snowball check`/`build` succeed immediately with no
+manual edits. It also appends `docs-check`/`docs-build` recipes to an existing
+`justfile` and writes a GitHub-only release-attach workflow at
+`.github/workflows/docs-release.yml`. It never creates a `justfile`; a repo
+with no task runner does not get one invented for it. Pass `--no-workflow` to
+skip the workflow.
+
+An existing file is left untouched and reported, not overwritten — pass
+`--force` to overwrite. `--dry-run` reports what would happen and writes
+nothing at all.
+
+`snowball init` remains the config-only command: it writes a starter
+`snowball.yaml` describing one book with no `theme:` key, for a repo that
+already has its own docs tree.
 
 ### Cleaning
 

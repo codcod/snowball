@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/codcod/snowball/internal/config"
+	"github.com/codcod/snowball/internal/scaffold"
 )
 
 // captureStdout runs fn with os.Stdout redirected and returns what was written.
@@ -92,7 +93,7 @@ func fakeToolchain(t *testing.T) string {
 func TestStarterConfigIsValid(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, config.DefaultFile)
-	if err := os.WriteFile(p, []byte(starterConfig), 0o644); err != nil {
+	if err := os.WriteFile(p, scaffold.StarterConfig("demo", false), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -100,18 +101,17 @@ func TestStarterConfigIsValid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the starter config does not load: %v", err)
 	}
-	if len(cfg.Books) != 2 {
-		t.Fatalf("starter config has %d books, want 2", len(cfg.Books))
+	if len(cfg.Books) != 1 {
+		t.Fatalf("starter config has %d books, want 1 (no dangling second book)", len(cfg.Books))
 	}
-	if cfg.Books[0].Out != "users-manual" || cfg.Books[1].Out != "developers-handbook" {
-		t.Errorf("unexpected book outputs: %+v", cfg.Books)
+	if cfg.Books[0].Out != "demo-user-manual" {
+		t.Errorf("unexpected book output: %+v", cfg.Books)
 	}
 	if len(cfg.Formats) != 2 {
 		t.Errorf("Formats = %v, want [pdf epub]", cfg.Formats)
 	}
-	dirName, name, ok := cfg.ThemeDirName()
-	if !ok || name != "ai-sdlc" || filepath.Base(dirName) != "pdf-theme" {
-		t.Errorf("theme resolved to (%q, %q, %v)", dirName, name, ok)
+	if _, _, ok := cfg.ThemeDirName(); ok {
+		t.Error("init's starter config sets a theme, want none — init writes no theme file")
 	}
 	if cfg.FailureLevel.PDF != "WARN" || cfg.FailureLevel.EPUB != "ERROR" || cfg.FailureLevel.Check != "WARN" {
 		t.Errorf("failure levels = %+v", cfg.FailureLevel)
@@ -137,8 +137,15 @@ func TestInitWritesStarterConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("init did not write %s: %v", config.DefaultFile, err)
 	}
-	if string(body) != starterConfig {
-		t.Error("written file does not match the starter config")
+	cfg, err := config.Load(config.DefaultFile)
+	if err != nil {
+		t.Fatalf("init wrote a config that does not load: %v\n%s", err, body)
+	}
+	if len(cfg.Books) != 1 {
+		t.Errorf("init config has %d books, want 1", len(cfg.Books))
+	}
+	if _, _, ok := cfg.ThemeDirName(); ok {
+		t.Error("init config sets a theme, want none")
 	}
 }
 
@@ -178,8 +185,11 @@ func TestInitForceOverwrites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(body) != starterConfig {
+	if string(body) == "books: []\n" {
 		t.Error("init --force did not overwrite the existing config")
+	}
+	if _, err := config.Load(config.DefaultFile); err != nil {
+		t.Errorf("init --force wrote a config that does not load: %v\n%s", err, body)
 	}
 }
 
