@@ -1,6 +1,7 @@
 package scaffold
 
 import (
+	"bytes"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -277,7 +278,8 @@ func TestNoForeignProductNameAnywhereInRepo(t *testing.T) {
 			return err
 		}
 		if strings.Contains(string(data), "ai-sdlc") {
-			t.Errorf("%s contains a foreign product name (ai-sdlc) — conventions.md § no workspace leakage", path)
+			t.Errorf("%s contains a foreign product name (ai-sdlc) — this project's source must not "+
+				"name another product", path)
 		}
 		return nil
 	}); err != nil {
@@ -355,26 +357,28 @@ func TestDocsJustfileMissingIsSkippedNeverCreated(t *testing.T) {
 	}
 }
 
-// TestDocsJustfileDetectsRecipeVariants: any legal `just` recipe header form
-// under a name scaffold also wants to append — with parameters, a default
-// value, or the "@" quiet modifier — must be detected as "already defined",
-// or scaffold appends a colliding second definition under the same name and
-// `just` refuses to parse the file at all, while still reporting success.
-// Two variants found this way, in two separate rounds: the parameterised
-// form first, then "@"-prefixed recipes once the parameterised fix shipped.
+// TestDocsJustfileDetectsRecipeVariants: any legal `just` construct binding a
+// name scaffold also wants to append — a parameterised recipe, a "@" quiet
+// recipe, or an alias — must be detected as "already defined", or scaffold
+// appends a colliding second definition and `just` refuses to parse the file
+// at all, while scaffold still reports success. Three variants found this
+// way, one per review round, which is why detection is now backed by
+// TestDocsJustfileRolledBackWhenAppendWouldBreakIt below rather than trusted
+// on its own.
 func TestDocsJustfileDetectsRecipeVariants(t *testing.T) {
 	cases := []struct {
 		name     string
-		header   string
-		contains string // a fragment of the original header that must survive verbatim
+		justfile string
+		contains string // a fragment of the original that must survive verbatim
 	}{
-		{"parameterised with default", `docs-build DIR="dist":`, `DIR="dist"`},
-		{"quiet modifier", `@docs-build:`, `@docs-build:`},
+		{"parameterised with default", "docs-build DIR=\"dist\":\n    echo body\n", `DIR="dist"`},
+		{"quiet modifier", "@docs-build:\n    echo body\n", "@docs-build:"},
+		{"alias", "some-other-recipe:\n    echo real\n\nalias docs-build := some-other-recipe\n", "alias docs-build :="},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			root := t.TempDir()
-			original := c.header + "\n    echo body\n"
+			original := c.justfile
 			if err := os.WriteFile(filepath.Join(root, "justfile"), []byte(original), 0o644); err != nil {
 				t.Fatal(err)
 			}
@@ -386,7 +390,7 @@ func TestDocsJustfileDetectsRecipeVariants(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if strings.Count(string(got), "docs-build") != 1 {
+			if strings.Count(string(got), "docs-build:") > 1 {
 				t.Errorf("justfile = %q, want the existing docs-build left exactly as-is, not duplicated", got)
 			}
 			if !contains(res.Skipped, "docs-build") {
@@ -396,6 +400,58 @@ func TestDocsJustfileDetectsRecipeVariants(t *testing.T) {
 				t.Errorf("justfile = %q, want the original header preserved verbatim", got)
 			}
 		})
+	}
+}
+
+// TestDocsJustfileRolledBackWhenAppendWouldBreakIt is the backstop for the
+// whole class of collisions the name detector may not recognise. It does not
+// go through definesName at all: it appends a recipe whose name is bound by a
+// construct chosen to collide, and asserts that when the result does not
+// parse, the user's original file comes back byte-identical and the caller is
+// told, instead of being left with a justfile in which *no* recipe runs.
+//
+// Requires `just` on PATH — the guarantee is best-effort by design (snowball
+// does not depend on a task runner), so without it there is nothing to assert.
+func TestDocsJustfileRolledBackWhenAppendWouldBreakIt(t *testing.T) {
+	if _, err := exec.LookPath("just"); err != nil {
+		t.Skip("just not on PATH — the rollback backstop consults it, so there is nothing to verify")
+	}
+	root := t.TempDir()
+	path := filepath.Join(root, "justfile")
+
+	// The collision is introduced by an *imported* file, so the name never
+	// appears in the justfile definesName reads. No amount of pattern-
+	// matching on the main file's text can find it — which is the point:
+	// this exercises the backstop, not the detector.
+	if err := os.WriteFile(filepath.Join(root, "other.just"),
+		[]byte("docs-build:\n    echo from-import\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	original := []byte("import 'other.just'\n\nmain-recipe:\n    echo main\n")
+	if err := os.WriteFile(path, original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !justfileParses(path) {
+		t.Fatal("fixture is wrong: the justfile must parse before scaffold runs")
+	}
+
+	res, err := Docs(root, Options{ProjectName: "demo"})
+	if err != nil {
+		t.Fatalf("Docs: %v", err)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !justfileParses(path) {
+		t.Errorf("justfile no longer parses after scaffold — the user's whole task runner is dead:\n%s", got)
+	}
+	if !bytes.Equal(got, original) {
+		t.Errorf("justfile = %q, want it restored byte-identical to %q", got, original)
+	}
+	if !contains(res.Skipped, "justfile") {
+		t.Errorf("Skipped = %v, want the caller told the justfile was left unchanged", res.Skipped)
 	}
 }
 
