@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/codcod/snowball/internal/config"
 )
 
 // Options configures a single `snowball scaffold` run.
@@ -78,7 +80,7 @@ func Docs(root string, opts Options) (Result, error) {
 	}
 
 	cfg := StarterConfig(name, true)
-	if err := writeScaffoldFile(root, "snowball.yaml", cfg, opts, &res); err != nil {
+	if err := writeScaffoldFile(root, config.DefaultFile, cfg, opts, &res); err != nil {
 		return res, err
 	}
 

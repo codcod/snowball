@@ -479,7 +479,7 @@ func TestExecuteRegistersEveryCommand(t *testing.T) {
 			t.Fatalf("Execute --help: %v", err)
 		}
 	})
-	for _, name := range []string{"build", "check", "doctor", "setup", "init", "version"} {
+	for _, name := range []string{"build", "check", "doctor", "setup", "init", "scaffold", "version"} {
 		if !strings.Contains(out, name) {
 			t.Errorf("--help does not list the %q command\n%s", name, out)
 		}

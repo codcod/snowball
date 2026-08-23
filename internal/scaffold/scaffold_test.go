@@ -22,7 +22,7 @@ func contains(list []string, want string) bool {
 	return false
 }
 
-// --- Tier 1: hermetic structural invariants, one per defect this ticket fixes ---
+// --- Tier 1: hermetic structural invariants, one per defect guarded against ---
 
 // defect 2: the theme filename and the config's theme: line must round-trip
 // through snowball's own ThemeDirName the way asciidoctor-pdf resolves it.

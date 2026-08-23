@@ -66,7 +66,7 @@ func themePath(name string) string {
 //
 //   - false (plain `snowball init`): no theme: key at all — init writes no
 //     theme file, so pointing at one would recreate the exact "theme file
-//     does not exist" failure this ticket fixes. A commented-out example
+//     does not exist" failure described above. A commented-out example
 //     documents the naming rule instead.
 //   - true (`snowball scaffold`): a real theme: line pointing at the theme
 //     file scaffold also writes, both derived from the same name so they
