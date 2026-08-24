@@ -1,0 +1,336 @@
+= Introduction
+
+{product} is a single Go binary that renders AsciiDoc book masters to PDF and
+EPUB, replacing a pile of `justfile` and CI recipes with one config-driven
+tool. It is a native orchestrator: it shells out to the asciidoctor toolchain
+(`asciidoctor-pdf`, `asciidoctor-epub3`, `asciidoctor-diagram`) and
+`mermaid-cli` (`mmdc`) on your `PATH` — the same engine and the same output
+fidelity (themes, diagrams, EPUB) as running those tools by hand, just one
+command instead of many. There is no Docker involved.
+
+== What it does
+
+{product} reads a `snowball.yaml` config that lists one or more books (an
+AsciiDoc master file plus an output name), a PDF theme, shared attributes,
+output formats, revision info and Mermaid diagram settings, and drives the
+asciidoctor toolchain to turn each book into the configured outputs. The
+main commands are:
+
+* `snowball scaffold` — lay down a starter docs skeleton (a one-book AsciiDoc
+  structure, a matching PDF theme and a `snowball.yaml`) in a repo that has
+  no docs yet.
+* `snowball init` — write a starter `snowball.yaml` only, for a repo whose
+  docs tree already exists.
+* `snowball setup` — install the pinned toolchain (asciidoctor gems via
+  bundler, `mermaid-cli`, Puppeteer's Chrome) into snowball's own cache, no
+  `sudo` required.
+* `snowball doctor` — verify the toolchain is present.
+* `snowball build` — render the configured books to PDF and/or EPUB.
+* `snowball watch` — re-render a book whenever its source tree changes.
+* `snowball check` — render every book master and discard the output, to
+  catch a broken include or an out-of-sequence section without keeping
+  artifacts (the fast path for MR/CI pipelines).
+* `snowball clean` — delete the PDFs/EPUBs a build would produce (and,
+  with `--cache`, the generated `.asciidoctor` cache directories).
+
+`snowball.yaml` is discovered by walking up from the working directory, so
+running any of these commands from inside `docs/` works the same as running
+them from the repository root.
+
+== Who this manual is for
+
+This manual is for anyone maintaining a book of AsciiDoc documentation with
+{product}: writing or restructuring chapters, configuring `snowball.yaml`,
+installing the underlying asciidoctor/mermaid toolchain, and running
+`build`/`check`/`watch` day to day.
+
+== Install
+
+Install the binary with Homebrew:
+
+[source,sh]
+----
+brew install codcod/tap/snowball
+----
+
+Then install the pinned rendering toolchain:
+
+[source,sh]
+----
+snowball setup
+snowball doctor
+----
+
+`setup` installs the language-level tools snowball owns: bundler, the pinned
+asciidoctor gem set, `mermaid-cli`, and Puppeteer's Chrome.
+
+It does not install the base environment. `ruby`, `gem`, `node`, and `npm`
+must already be on your `PATH`. OS-level libraries Chrome needs are also the
+environment's job. If one of those prerequisites is missing, `setup` fails
+fast naming it; `doctor` reports the full state of the toolchain.
+
+snowball installs its own toolchain into its user cache, not system
+directories, so it does not need `sudo`.
+
+== Initialize a repo
+
+Choose one starting point depending on the repository you are in.
+
+=== New repo with no docs yet
+
+Use `scaffold` when the repository does not already have an AsciiDoc docs tree:
+
+[source,sh]
+----
+snowball scaffold --project-name my-project
+snowball setup
+snowball doctor
+snowball build
+----
+
+`scaffold` writes:
+
+* `docs/user-manual.adoc`
+* `docs/user-manual/introduction.adoc`
+* `docs/attributes.adoc`
+* `docs/pdf-theme/<project>-theme.yml`
+* `snowball.yaml`
+
+It also appends `docs-check` and `docs-build` recipes to an existing
+`justfile`, and writes `.github/workflows/docs-release.yml` unless you pass
+`--no-workflow`.
+
+Existing files are left untouched and reported. Use `--force` to overwrite
+them, or `--dry-run` to see what would change without writing anything.
+
+The scaffolded chapters are structure, not content — see <<docs-prompt>> for
+how to fill them in.
+
+[[docs-prompt]]
+=== Filling in scaffolded content
+
+`scaffold` writes placeholder chapters, not real content. Each placeholder
+chapter contains a `// TODO: replace this placeholder chapter` comment and a
+one-sentence stand-in like `{product} does ... (replace this with a
+one-sentence summary of what it does).`.
+
+`snowball docs-prompt` prints a self-contained prompt for an AI coding agent
+to replace those placeholders with real, project-specific content, grounded in
+the project's own README, source, configuration, and CLI output:
+
+[source,sh]
+----
+snowball docs-prompt
+----
+
+Pipe the output straight into your agent of choice, for example:
+
+[source,sh]
+----
+snowball docs-prompt | llm
+----
+
+The prompt instructs the agent to:
+
+* find every file under `docs/` still containing a placeholder marker;
+* replace the placeholder text with content specific to the project, not a
+  reworded template, and not invented behavior;
+* preserve the chapter/leveloffset structure `scaffold` set up, so section
+  numbering does not break;
+* finish by running `snowball check` to confirm the manual still builds.
+
+`docs-prompt` takes no flags and never writes to the repository itself — it
+only prints the prompt text to stdout.
+
+=== Existing docs tree
+
+Use `init` when the repository already has its own AsciiDoc structure and only
+needs a starter `snowball.yaml`:
+
+[source,sh]
+----
+snowball init --project-name my-project
+snowball setup
+snowball doctor
+snowball build
+----
+
+`init` writes a one-book starter config in the current directory. If
+`snowball.yaml` already exists, it refuses to overwrite it unless you pass
+`--force`.
+
+== Configuration
+
+snowball reads `snowball.yaml` from the current directory, or by walking up
+through parent directories until it finds one. That means `cd docs &&
+snowball build` behaves the same as running from the repository root.
+
+A typical config looks like this:
+
+[source,yaml]
+----
+books:
+  - src: docs/user-manual.adoc
+    out: users-manual
+  - src: docs/developer-handbook.adoc
+    out: developers-handbook
+theme: docs/pdf-theme/my-project-theme.yml
+attributes:
+  toc: left
+  sectnums: ""
+  product-version: "2026.1"
+formats: [pdf, epub]
+revision:
+  from: git-describe
+  date-format: "%d %B %Y"
+mermaid:
+  format: png
+  puppeteer-args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
+failure-level:
+  pdf: WARN
+  epub: ERROR
+  check: WARN
+----
+
+=== Books
+
+`books` is required.
+
+Each entry names:
+
+* `src`: the AsciiDoc master file to render
+* `out`: the output basename without an extension
+
+If `out` is omitted, snowball uses the source file's stem.
+
+=== Theme
+
+`theme` is optional. If you omit it, PDF rendering uses asciidoctor-pdf's
+built-in default theme.
+
+When you do set one, the filename must end in `-theme.yml`. snowball derives
+the theme name from that filename and passes it to asciidoctor-pdf as
+`pdf-theme` plus `pdf-themesdir`. A different suffix does not round-trip
+correctly.
+
+=== Attributes
+
+Every key under `attributes` becomes an `-a` flag on every render, including
+PDF, EPUB, and `check`.
+
+The mapping is:
+
+* `key: value` -> `-a key=value`
+* `key: ""` -> `-a key`
+* `key: false` -> `-a key!`
+
+Do not use `attributes` for values snowball manages itself: `revnumber`,
+`revdate`, `mermaid-format`, `mermaid-puppeteer-config`, `pdf-theme`, and
+`pdf-themesdir`. Use `revision`, `mermaid`, or `theme` instead.
+
+`attributes` must be a YAML map. Older configs that pointed it at a shared
+`.adoc` file are rejected. To keep a shared attribute file, include it from the
+book master instead:
+
+[source,adoc]
+----
+\include::docs/attributes.adoc[]
+----
+
+=== Formats
+
+If `formats` is omitted, snowball renders both `pdf` and `epub`.
+
+=== Revision
+
+By default, snowball sets `revnumber` from `git describe` and `revdate` from
+today's date.
+
+Use `revision.from: static` plus `revision.static` when you want a fixed
+revision string in the config. `revision.date-format` is strftime-style.
+
+=== Mermaid
+
+`mermaid.format` defaults to `png`.
+
+`mermaid.puppeteer-args` lets you pass Chrome launch flags through to
+`mermaid-cli`. The default arguments are aimed at CI and container-safe
+execution.
+
+=== Failure levels
+
+Defaults are:
+
+* PDF: `WARN`
+* EPUB: `ERROR`
+* check: `WARN`
+
+== Day-to-day commands
+
+=== Build
+
+Render the configured books:
+
+[source,sh]
+----
+snowball build
+----
+
+Useful flags:
+
+* `--pdf` or `--epub` to limit formats
+* `--book NAME` to limit to specific books by `out` or `src` name
+* `-o DIR` to write outputs under a specific directory
+* `--rev` and `--date` to override revision values
+* `-j N` to render up to `N` books concurrently
+
+Flags override config.
+
+Concurrency is per book, never per format. PDF and EPUB for the same book share
+asciidoctor-diagram outputs and caches, so snowball serializes formats within a
+book on purpose.
+
+=== Watch
+
+`snowball watch` renders once, then rebuilds whenever a watched source changes.
+
+It watches each book's source tree, not only the master file, so edits to
+included chapters trigger rebuilds too. It deliberately reacts only to `.adoc`
+files and the configured theme, avoiding rebuild loops from generated PDFs,
+EPUBs, and diagram artifacts.
+
+=== Check
+
+`snowball check` renders each book master and discards the output. Use it in CI
+or merge request pipelines to catch broken includes, invalid section ordering,
+or other render-time failures without keeping artifacts.
+
+=== Clean
+
+`snowball clean` removes the `.pdf` and `.epub` files a build would produce.
+It honors the same `--book`, `--pdf`, `--epub`, and `-o` targeting flags.
+
+It does not need the toolchain installed.
+
+Generated diagram images are left alone because they sit next to source files
+and are not safely distinguishable from checked-in assets. Pass `--cache` to
+also remove asciidoctor's generated `.asciidoctor` cache directories.
+
+=== Global flags
+
+These flags apply across commands:
+
+* `-c, --config FILE` to point at a specific `snowball.yaml`
+* `-q, --quiet` to suppress progress output
+* `--verbose` to log every command snowball runs
+
+== Developing snowball
+
+If you are working on snowball itself rather than using it in another repo:
+
+[source,sh]
+----
+just build
+just test
+just lint
+----

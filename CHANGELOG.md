@@ -8,6 +8,15 @@ While the version is below `1.0.0`, breaking changes may land in a minor release
 
 ## [Unreleased]
 
+### Added
+
+- Adopted snowball's own docs/release scaffold on itself: `docs/user-manual.adoc` (+ an
+  `introduction.adoc` chapter and `docs/attributes.adoc`), a matching PDF theme
+  (`docs/pdf-theme/snowball-theme.yml`), `snowball.yaml`, the `docs-check`/`docs-build`
+  justfile recipes, and `.github/workflows/docs-release.yml` — the same pattern morty
+  (MRTY-005) and summer (SUMR-003) adopted from snowball's `scaffold` output. `README.md` is
+  trimmed to install/quick-start and now points at the manual for everything else.
+
 ## [0.3.0] - 2026-08-23
 
 ### Added

@@ -5,12 +5,11 @@
 the Homebrew formula in a separate tap repo (`github.com/codcod/homebrew-tap` →
 `brew install codcod/tap/snowball`).
 
-> Two things differ from the sibling Go projects that share this release shape. First,
-> snowball **ships no user manual of its own**: `README.md` and `CHANGELOG.md` are its whole
-> documentation surface. Because snowball renders *other* projects' books rather than one of
-> its own, there is no docs-attach step and no `docs-release.yml` workflow here. Second,
-> `.goreleaser.yaml` does **not** set `mode: replace`, so a re-run behaves differently (see
-> [Re-running a release](#re-running-a-release)).
+> Unlike morty and summer, snowball's own AsciiDoc user manual (`docs/user-manual.adoc`) is
+> built and attached by [`docs-release.yml`](.github/workflows/docs-release.yml), the same
+> way theirs is — snowball dogfoods its own scaffold output. One thing still differs from
+> those sibling Go projects: `.goreleaser.yaml` does **not** set `mode: replace`, so a re-run
+> behaves differently (see [Re-running a release](#re-running-a-release)).
 
 ## Cutting a release
 
@@ -53,6 +52,9 @@ For `linux`/`darwin`/`windows` × `amd64`/`arm64`:
 - an updated **Homebrew formula** committed to the tap. The formula declares `ruby` and
   `node` as dependencies. Its caveat tells the user to run `snowball setup` once to install
   the pinned gems, mermaid-cli and Chrome;
+- publishing the release fires [`docs-release.yml`](.github/workflows/docs-release.yml),
+  which builds the AsciiDoc user manual with snowball itself and attaches the PDF/EPUB to the
+  same release — soft-failing (a broken manual never unpublishes or blocks the release);
 - a **prerelease**, automatically, when the tag looks like one (`prerelease: auto` — so
   `v1.0.0-rc.1` is marked as such without any extra step).
 

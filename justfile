@@ -31,3 +31,11 @@ clean:
     rm -f {{bin}}
 
 # vim: set ft=make:et:ai
+
+# Validate the AsciiDoc manual via snowball (broken includes/xrefs fail the check)
+docs-check:
+    snowball check
+
+# Render the user manual to PDF + EPUB into dist/docs/ (never committed)
+docs-build:
+    snowball build -o dist/docs
