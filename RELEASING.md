@@ -5,11 +5,17 @@
 the Homebrew formula in a separate tap repo (`github.com/codcod/homebrew-tap` →
 `brew install codcod/tap/snowball`).
 
-> Unlike morty and summer, snowball's own AsciiDoc user manual (`docs/user-manual.adoc`) is
-> built and attached by [`docs-release.yml`](.github/workflows/docs-release.yml), the same
-> way theirs is — snowball dogfoods its own scaffold output. One thing still differs from
-> those sibling Go projects: `.goreleaser.yaml` does **not** set `mode: replace`, so a re-run
-> behaves differently (see [Re-running a release](#re-running-a-release)).
+> Like morty and summer, snowball's own AsciiDoc user manual (`docs/user-manual.adoc`) is
+> built and attached by [`docs-release.yml`](.github/workflows/docs-release.yml) — snowball
+> dogfoods its own scaffold output. That workflow triggers on `release.yml`'s completion
+> (`workflow_run`), not on the `release: published` event goreleaser raises: that event is
+> created with the default `secrets.GITHUB_TOKEN`, and GitHub does not chain further workflow
+> runs off events raised by that token, so a plain `release: published` trigger alone never
+> actually fires — confirmed live, absent from all 8 of snowball's own past releases. It also
+> runs on `macos-latest`, not `ubuntu-latest`, because it needs a preinstalled Homebrew. One
+> thing still differs from those sibling Go projects: `.goreleaser.yaml` does **not** set
+> `mode: replace` (or `replace_existing_artifacts`), so a re-run behaves differently (see
+> [Re-running a release](#re-running-a-release)).
 
 ## Cutting a release
 
@@ -52,9 +58,10 @@ For `linux`/`darwin`/`windows` × `amd64`/`arm64`:
 - an updated **Homebrew formula** committed to the tap. The formula declares `ruby` and
   `node` as dependencies. Its caveat tells the user to run `snowball setup` once to install
   the pinned gems, mermaid-cli and Chrome;
-- publishing the release fires [`docs-release.yml`](.github/workflows/docs-release.yml),
-  which builds the AsciiDoc user manual with snowball itself and attaches the PDF/EPUB to the
-  same release — soft-failing (a broken manual never unpublishes or blocks the release);
+- once that release run **succeeds**, [`docs-release.yml`](.github/workflows/docs-release.yml)
+  runs next, builds the AsciiDoc user manual with snowball itself, and attaches the PDF/EPUB
+  to the same release — soft-failing (a broken manual never unpublishes or blocks the
+  release);
 - a **prerelease**, automatically, when the tag looks like one (`prerelease: auto` — so
   `v1.0.0-rc.1` is marked as such without any extra step).
 

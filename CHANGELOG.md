@@ -8,6 +8,19 @@ While the version is below `1.0.0`, breaking changes may land in a minor release
 
 ## [Unreleased]
 
+### Fixed
+
+- `docs-release.yml` has never actually attached the AsciiDoc user manual to any of
+  snowball's 8 releases (`v0.1.0`–`v0.3.0`): its `release: published` trigger never fires,
+  because `release.yml` creates the GitHub release with the default `secrets.GITHUB_TOKEN`,
+  and GitHub does not chain further workflow runs off events raised by that token (confirmed
+  live — zero `docs-release` runs in snowball's own Actions history). Added a `workflow_run`
+  trigger keyed to `release.yml`'s completion as a second path; kept `release: published` for
+  a human-published release. Also switched the job from `ubuntu-latest` to `macos-latest`,
+  since it needs a preinstalled Homebrew that only the macOS runner image has — confirmed
+  live on morty ("brew: command not found"), where this job had never run to completion
+  before either.
+
 ### Added
 
 - Adopted snowball's own docs/release scaffold on itself: `docs/user-manual.adoc` (+ an
