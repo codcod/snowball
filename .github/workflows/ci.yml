@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build-test:
     runs-on: ubuntu-latest
@@ -33,3 +37,39 @@ jobs:
 
       - name: smoke
         run: ./snowball version && ./snowball --help
+
+  goreleaser-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          install-only: true
+      # Exit 2 = "valid, but deprecated properties": the `brews` (formula) pipe
+      # is deliberate (see .goreleaser.yaml), so tolerate it — mirrors
+      # `just dist-check` and pickle's own ci.yml. Exit 1 (invalid config) still fails.
+      - name: goreleaser check
+        run: goreleaser check || [ $? -eq 2 ]
+
+  ci-surface:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      # Pinned, never @latest: a floating lint version turns unrelated PRs red
+      # (mirrors pickle's own ci.yml). setup-go above is required: without it
+      # `go install` still succeeds but its target GOPATH/bin never reaches
+      # $GITHUB_PATH, so the next step fails with "actionlint: command not found".
+      - name: install actionlint
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+      - name: actionlint
+        run: actionlint
+      # No shellcheck step: unlike pickle, this repo has no .github/scripts/ —
+      # add one back here if that ever changes.

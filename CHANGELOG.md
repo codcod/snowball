@@ -8,27 +8,46 @@ While the version is below `1.0.0`, breaking changes may land in a minor release
 
 ## [Unreleased]
 
+### Changed
+
+- Aligned snowball's own release tooling with morty and summer, closing the gap found by a
+  cross-repo review of the three Go children's release files: pinned the release forge
+  explicitly in `.goreleaser.yaml` (`release.github: {owner: codcod, name: snowball}`),
+  declaring intent to use GitHub (the pin alone does not override goreleaser's env-based
+  forge detection — the justfile's `env -u GITLAB_TOKEN` guard remains the actual mitigation
+  against a stray token, see RELEASING.md); set `project_name: snowball`; adopted
+  `mode: replace` + `replace_existing_artifacts: true` under `release:` so
+  a `workflow_dispatch` re-run of an existing tag overwrites already-published assets instead
+  of failing with `422 already_exists` (proven live on morty); added `dist-check`,
+  `dist-snapshot` and `show-version` recipes to the `justfile`; added a `concurrency:` guard
+  to both `release.yml` (never cancel an in-flight release) and `ci.yml`; and added
+  `goreleaser-check`/`ci-surface` (actionlint) jobs to `ci.yml`, validating
+  `.goreleaser.yaml` and the repo's own workflow YAML on every push/PR. `RELEASING.md` is
+  updated to match (re-run section, GitLab-token warning, a cross-reference to pickle's and
+  morty/summer's process).
+
 ### Fixed
 
 - `docs-release.yml` has never actually attached the AsciiDoc user manual to any of
-  snowball's 8 releases (`v0.1.0`–`v0.3.0`): its `release: published` trigger never fires,
+  snowball's 8 releases (`v0.1.0`–`v0.3.0`). Its `release: published` trigger never fires
   because `release.yml` creates the GitHub release with the default `secrets.GITHUB_TOKEN`,
   and GitHub does not chain further workflow runs off events raised by that token (confirmed
-  live — zero `docs-release` runs in snowball's own Actions history). Added a `workflow_run`
-  trigger keyed to `release.yml`'s completion as a second path; kept `release: published` for
-  a human-published release. Also switched the job from `ubuntu-latest` to `macos-latest`,
-  since it needs a preinstalled Homebrew that only the macOS runner image has — confirmed
-  live on morty ("brew: command not found"), where this job had never run to completion
-  before either.
+  live — zero `docs-release` runs in snowball's own Actions history). The change added a
+  `workflow_run` trigger keyed to `release.yml`'s completion as a second path and kept
+  `release: published` for a human-published release. It also switched the job from
+  `ubuntu-latest` to `macos-latest`, since it needs a preinstalled Homebrew that only the
+  macOS runner image has — confirmed live on morty ("brew: command not found"), where this
+  job had never run to completion before either.
 
 ### Added
 
 - Adopted snowball's own docs/release scaffold on itself: `docs/user-manual.adoc` (+ an
   `introduction.adoc` chapter and `docs/attributes.adoc`), a matching PDF theme
   (`docs/pdf-theme/snowball-theme.yml`), `snowball.yaml`, the `docs-check`/`docs-build`
-  justfile recipes, and `.github/workflows/docs-release.yml` — the same pattern morty
-  (MRTY-005) and summer (SUMR-003) adopted from snowball's `scaffold` output. `README.md` is
-  trimmed to install/quick-start and now points at the manual for everything else.
+  justfile recipes, and `.github/workflows/docs-release.yml`. This follows the same pattern
+  morty (MRTY-005) and summer (SUMR-003) adopted from snowball's `scaffold` output.
+  `README.md` is trimmed to install/quick-start and now points at the manual for everything
+  else.
 
 ## [0.3.0] - 2026-08-23
 

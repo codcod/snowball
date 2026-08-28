@@ -2,6 +2,8 @@
 # Docs: https://goreleaser.com
 version: 2
 
+project_name: snowball
+
 before:
   hooks:
     - go mod tidy
@@ -42,9 +44,27 @@ changelog:
       - "^test:"
       - "^chore:"
 
+# Pin the release forge to GitHub explicitly. This declares intent, but does NOT override
+# goreleaser's env-based forge detection: a stray GITLAB_TOKEN or
+# GITLAB_PERSONAL_ACCESS_TOKEN in the environment still wins over this pin. Confirmed:
+# `goreleaser release` picks GitLab from the token regardless of what is set here, while a
+# bare `goreleaser check` does not consult it at all. The actual guard is the
+# `env -u GITLAB_TOKEN -u GITLAB_PERSONAL_ACCESS_TOKEN` wrapper in the justfile's
+# dist-check/dist-snapshot recipes (CI never sets a GitLab token, so it is unaffected either
+# way). See RELEASING.md's "Validating locally" section.
 release:
+  github:
+    owner: codcod
+    name: snowball
   draft: false
   prerelease: auto
+  mode: replace
+  replace_existing_artifacts: true   # `mode: replace` alone only governs the release body/
+  # changelog; without this, a re-run's asset uploads still 422 on an already-published tag.
+  # Verified live on morty: a workflow_dispatch re-run of an existing tag re-uploaded every
+  # asset cleanly with both keys set.
+  # The PDF/EPUB user manual is NOT attached here — docs-release.yml attaches it separately
+  # once this release publishes, so a broken manual build can never sink this pipe.
 
 brews:
   - name: snowball

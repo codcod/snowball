@@ -5,16 +5,19 @@
 the Homebrew formula in a separate tap repo (`github.com/codcod/homebrew-tap` →
 `brew install codcod/tap/snowball`).
 
+> This process is the same shape as [pickle](https://github.com/codcod/pickle)'s and
+> morty/summer's `RELEASING.md` — snowball's own carries more operational detail because it
+> has actually shipped 8+ releases, not because the process itself differs.
+
 > Like morty and summer, snowball's own AsciiDoc user manual (`docs/user-manual.adoc`) is
 > built and attached by [`docs-release.yml`](.github/workflows/docs-release.yml) — snowball
-> dogfoods its own scaffold output. That workflow triggers on `release.yml`'s completion
-> (`workflow_run`), not on the `release: published` event goreleaser raises: that event is
-> created with the default `secrets.GITHUB_TOKEN`, and GitHub does not chain further workflow
-> runs off events raised by that token, so a plain `release: published` trigger alone never
-> actually fires — confirmed live, absent from all 8 of snowball's own past releases. It also
-> runs on `macos-latest`, not `ubuntu-latest`, because it needs a preinstalled Homebrew. One
-> thing still differs from those sibling Go projects: `.goreleaser.yaml` does **not** set
-> `mode: replace` (or `replace_existing_artifacts`), so a re-run behaves differently (see
+> dogfoods its own scaffold output. The workflow triggers when `release.yml` completes
+> (`workflow_run`), not on goreleaser's `release: published` event. Releases created with
+> the default `secrets.GITHUB_TOKEN` do not trigger further workflow runs, so a
+> `release: published` trigger alone never fires; snowball's past 8 releases confirm that.
+> The job also runs on `macos-latest`, not `ubuntu-latest`, because it needs
+> preinstalled Homebrew. `.goreleaser.yaml` now sets `mode: replace` and
+> `replace_existing_artifacts: true`, matching morty/summer (see
 > [Re-running a release](#re-running-a-release)).
 
 ## Cutting a release
@@ -59,9 +62,9 @@ For `linux`/`darwin`/`windows` × `amd64`/`arm64`:
   `node` as dependencies. Its caveat tells the user to run `snowball setup` once to install
   the pinned gems, mermaid-cli and Chrome;
 - once that release run **succeeds**, [`docs-release.yml`](.github/workflows/docs-release.yml)
-  runs next, builds the AsciiDoc user manual with snowball itself, and attaches the PDF/EPUB
-  to the same release — soft-failing (a broken manual never unpublishes or blocks the
-  release);
+  runs next. It builds the AsciiDoc user manual with snowball itself and attaches the
+  PDF/EPUB to the same release. It soft-fails, so a broken manual never unpublishes or
+  blocks the release;
 - a **prerelease**, automatically, when the tag looks like one (`prerelease: auto` — so
   `v1.0.0-rc.1` is marked as such without any extra step).
 
@@ -74,38 +77,47 @@ The workflow can be re-run for an **existing** tag via *Actions → release → 
 Use `workflow_dispatch` and pass the tag name. This is useful after fixing a missing or
 expired secret.
 
-Unlike the sibling projects, snowball's `.goreleaser.yaml` does **not** set `mode: replace`
-under `release:`. A re-run against a tag whose assets are already published can therefore
-fail with `422 already_exists` rather than overwriting them. Either delete the existing
-release's assets first, or add `mode: replace` to the `release:` block if re-runs become
-routine.
+`.goreleaser.yaml`'s `mode: replace` **plus** `replace_existing_artifacts: true` lets a
+re-run overwrite already-published artifacts instead of failing with `422 already_exists`.
+`mode: replace` alone affects only the release body/changelog strategy; without the second
+key, every asset upload on a re-run still 422s. This is proven behavior: on morty, a
+`workflow_dispatch` re-run of an existing tag re-uploaded every asset cleanly with both keys
+set.
+
+> **Changed recently.** Before this, snowball's `.goreleaser.yaml` set neither key, so a
+> re-run against a tag whose assets were already published failed with `422 already_exists`
+> unless the existing release's assets were deleted first. Anyone diffing release history
+> against an older tag should expect that older behavior instead.
 
 ## Validating locally (no publish)
 
-There are no `dist-*` recipes in the [`justfile`](justfile). Invoke goreleaser directly
-(`brew install goreleaser`):
-
 ```sh
-goreleaser check                       # is .goreleaser.yaml valid?
-goreleaser release --snapshot --clean  # cross-compile into ./dist, upload nothing
+just dist-check      # goreleaser check — is .goreleaser.yaml valid?
+just dist-snapshot   # cross-compile into ./dist, upload nothing
 ```
 
 > **`goreleaser check` currently exits non-zero, and that is expected.** It reports
-> `configuration is valid, but uses deprecated properties` — the `brews:` block, which
-> GoReleaser deprecated in favour of `homebrew_casks`. The configuration still works: releases
-> up to and including `v0.3.0` published their formula from it. Read a `check` failure by
-> looking at *which* line failed — a deprecation notice is known, anything else is not. This
-> will stop being merely a warning whenever GoReleaser removes the key, and the release
-> workflow tracks the latest v2 (`version: "~> v2"`), so the break will arrive on GoReleaser's
-> schedule rather than on a change made here.
+> `configuration is valid, but uses deprecated properties` because the `brews:` block has
+> been deprecated in favour of `homebrew_casks`. That warning is expected, and the
+> configuration still works: releases up to and including `v0.3.0` published their formula
+> from it. When `check` fails, focus on *which* line failed: this deprecation notice is
+> known; anything else is not. The release workflow tracks the latest v2
+> (`version: "~> v2"`), so this will stop being only a warning whenever GoReleaser removes
+> the key.
 
-> **Unset `GITLAB_TOKEN` before running goreleaser locally.** GoReleaser picks its forge from
-> the environment, so a `GITLAB_TOKEN` or `GITLAB_PERSONAL_ACCESS_TOKEN` left set for some
-> other project makes it treat this repository as GitLab-hosted and generate a Homebrew
-> formula whose download URLs point at `gitlab.com/codcod/snowball` — a repository that does
-> not exist. It is harmless under `--snapshot`, which uploads nothing, but a local
-> non-snapshot run would publish a formula that fails for every user. CI is unaffected (it
-> sets no GitLab token), and the tap is correct today. When in doubt:
+> **Unset `GITLAB_TOKEN` before running goreleaser locally — this is still required.**
+> GoReleaser picks its forge from the environment. If `GITLAB_TOKEN` or
+> `GITLAB_PERSONAL_ACCESS_TOKEN` is left set for some other project, it treats this
+> repository as GitLab-hosted and generates a Homebrew formula whose download URLs point at
+> `gitlab.com/codcod/snowball` — a repository that does not exist. `.goreleaser.yaml` now sets
+> `release.github: {owner: codcod, name: snowball}` explicitly, but **this does not change
+> the above**: it declares intent, it does not override goreleaser's env-based detection,
+> and a stray GitLab token still wins (confirmed live — pinning the forge did not stop it).
+> The `dist-check`/`dist-snapshot` justfile recipes defensively `env -u GITLAB_TOKEN -u
+> GITLAB_PERSONAL_ACCESS_TOKEN`, and that guard remains required, not optional. A misdetected
+> run is harmless under `--snapshot`, which uploads nothing; a local non-snapshot run without
+> the guard would not produce a usable release at all. CI is unaffected (it sets no GitLab
+> token), and the tap is correct today. When in doubt:
 >
 > ```sh
 > env -u GITLAB_TOKEN -u GITLAB_PERSONAL_ACCESS_TOKEN goreleaser release --snapshot --clean
@@ -117,8 +129,10 @@ goreleaser release --snapshot --clean  # cross-compile into ./dist, upload nothi
 > grep -o 'url "https://[^/]*' dist/homebrew/snowball.rb | sort -u   # expect github.com
 > ```
 
-Run the ordinary gates before tagging, too — CI runs the same static checks plus a build,
-the test suite, and a `version`/`--help` smoke:
+Run the ordinary gates before tagging, too. CI runs the same static checks, plus a build,
+the test suite, a `version`/`--help` smoke test, a `.goreleaser.yaml` validation
+(`goreleaser-check`), and a workflow-YAML lint (`ci-surface`, actionlint). `ci.yml` and
+`release.yml` also carry a `concurrency:` guard against overlapping runs:
 
 ```sh
 just build && just test && just lint
@@ -136,5 +150,5 @@ just build && just test && just lint
 ## Versioning
 
 Semantic versioning. While the version is below `1.0.0`, breaking changes may land in a minor
-release. They must be labelled `### Breaking` in the changelog and carry a migration hint in
-the error the user actually hits, rather than being left as silent behaviour drift.
+release. They must be labelled `### Breaking` in the changelog and include a migration hint
+in the error the user actually sees, rather than becoming silent behaviour drift.
