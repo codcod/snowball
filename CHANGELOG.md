@@ -38,6 +38,18 @@ While the version is below `1.0.0`, breaking changes may land in a minor release
   `ubuntu-latest` to `macos-latest`, since it needs a preinstalled Homebrew that only the
   macOS runner image has — confirmed live on morty ("brew: command not found"), where this
   job had never run to completion before either.
+- `scaffold`'s GitHub-owner detection resolved a confidently wrong owner from a look-alike or
+  embedded host (e.g. `mygithub.com`, `notgithub.com`, or `github.com` appearing later in an
+  unrelated remote's path) because its regex matched "github.com" anywhere in the URL instead
+  of anchoring it to the start; those hosts now correctly resolve to the `TODO-owner`
+  placeholder, same as GitHub Enterprise already did.
+- Scaffolding a subdirectory of an unrelated git checkout silently inherited that checkout's
+  GitHub owner (git's own upward search for a remote, following `git -C <root>`); a note now
+  names the enclosing repository whenever it differs from the scaffold root, so the owner is
+  never silently taken from somewhere else.
+- `--homebrew` silently did nothing when `.goreleaser.yaml` already existed — the `brews:` tap
+  block the user asked for was never appended, and nothing was printed to say so. A note now
+  explains the no-op and points at `--force`.
 
 ### Added
 

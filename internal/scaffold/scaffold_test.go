@@ -472,8 +472,16 @@ func TestDetectGitHubOwnerTable(t *testing.T) {
 		{"https without .git suffix", "https://github.com/codcod/demo", "codcod", true},
 		{"ssh with .git suffix", "git@github.com:codcod/demo.git", "codcod", true},
 		{"ssh without .git suffix", "git@github.com:codcod/demo", "codcod", true},
+		{"uri-style ssh", "ssh://git@github.com/codcod/demo.git", "codcod", true},
 		{"non-github remote", "https://gitlab.com/codcod/demo.git", "", false},
 		{"no origin remote", "", "", false},
+		// defect: the regex used to be unanchored on the host, so any of these
+		// resolved a confidently wrong owner from a look-alike or embedded
+		// "github.com" instead of correctly reporting ok=false.
+		{"look-alike host prefix", "https://mygithub.com/other/repo.git", "", false},
+		{"look-alike host substring", "https://notgithub.com/evil/repo.git", "", false},
+		{"github.com embedded in an unrelated host's path", "https://gitlab.com/x/github.com/evil/repo.git", "", false},
+		{"github enterprise host", "https://github.example.com/other/repo.git", "", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -923,6 +931,91 @@ func TestDocsUnknownGitHubOwnerNoteSuppressedWhenSkippingExisting(t *testing.T) 
 	}
 	if contains(res.Notes, unknownGitHubOwner) {
 		t.Errorf("Notes = %v, want no owner note when the existing file was left untouched", res.Notes)
+	}
+}
+
+// defect: --homebrew silently did nothing when .goreleaser.yaml already
+// existed — the exists-skip default correctly left the file alone, but the
+// brews: block the user asked for was then never appended, and nothing was
+// printed to say so.
+func TestDocsHomebrewNoOpWhenGoreleaserConfigExists(t *testing.T) {
+	root := t.TempDir() // no git remote
+	existing := "version: 2\nproject_name: other\n"
+	if err := os.WriteFile(filepath.Join(root, goreleaserConfigPath), []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Docs(root, Options{ProjectName: "demo", Homebrew: true})
+	if err != nil {
+		t.Fatalf("Docs: %v", err)
+	}
+	gr, err := os.ReadFile(filepath.Join(root, goreleaserConfigPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gr) != existing {
+		t.Errorf(".goreleaser.yaml changed on a re-run without --force: got %q, want unchanged %q", gr, existing)
+	}
+	if !contains(res.Notes, "--homebrew had nothing to attach to") {
+		t.Errorf("Notes = %v, want a note explaining --homebrew was a no-op", res.Notes)
+	}
+}
+
+// Control for the above: without --homebrew, the exists-skip default is
+// unremarkable and gets no --homebrew-specific note.
+func TestDocsNoHomebrewNoteWhenGoreleaserConfigExistsWithoutHomebrew(t *testing.T) {
+	root := t.TempDir() // no git remote
+	existing := "version: 2\nproject_name: other\n"
+	if err := os.WriteFile(filepath.Join(root, goreleaserConfigPath), []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Docs(root, Options{ProjectName: "demo"})
+	if err != nil {
+		t.Fatalf("Docs: %v", err)
+	}
+	if contains(res.Notes, "--homebrew had nothing to attach to") {
+		t.Errorf("Notes = %v, want no --homebrew note when --homebrew was not requested", res.Notes)
+	}
+}
+
+// defect: git -C root searches upward, so scaffolding a plain subdirectory of
+// an unrelated checkout silently inherited that repository's owner —
+// detection "succeeded", so no note fired at all.
+func TestDocsOwnerNoteWhenRepoIsAboveScaffoldRoot(t *testing.T) {
+	parent := t.TempDir()
+	runGitIfAvailable(t, parent, "https://github.com/someoneelse/unrelated.git")
+	root := filepath.Join(parent, "sub")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Docs(root, Options{ProjectName: "demo"})
+	if err != nil {
+		t.Fatalf("Docs: %v", err)
+	}
+	gr, err := os.ReadFile(filepath.Join(root, goreleaserConfigPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(gr), "owner: someoneelse") {
+		t.Errorf(".goreleaser.yaml = %q, want the enclosing repository's real owner", gr)
+	}
+	if !contains(res.Notes, "enclosing repository") {
+		t.Errorf("Notes = %v, want a note naming the enclosing repository", res.Notes)
+	}
+}
+
+// Control for the above: scaffolding directly at a repository's own root
+// resolves an owner that is not cross-repository, so no such note fires —
+// guards against the EvalSymlinks-based comparison false-positiving on its
+// own fixture (e.g. macOS's /tmp -> /private/tmp).
+func TestDocsNoOwnerNoteWhenRepoIsScaffoldRoot(t *testing.T) {
+	root := t.TempDir()
+	runGitIfAvailable(t, root, "https://github.com/someoneelse/unrelated.git")
+	res, err := Docs(root, Options{ProjectName: "demo"})
+	if err != nil {
+		t.Fatalf("Docs: %v", err)
+	}
+	if contains(res.Notes, "enclosing repository") {
+		t.Errorf("Notes = %v, want no cross-repository note when root is the repository root", res.Notes)
 	}
 }
 
