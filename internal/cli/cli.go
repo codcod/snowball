@@ -271,24 +271,33 @@ func initCmd() *cobra.Command {
 
 func scaffoldCmd() *cobra.Command {
 	var (
-		projectName string
-		force       bool
-		dryRun      bool
-		noWorkflow  bool
+		projectName       string
+		force             bool
+		dryRun            bool
+		noWorkflow        bool
+		noReleaseWorkflow bool
+		homebrew          bool
 	)
 	cmd := &cobra.Command{
 		Use:   "scaffold",
-		Short: "Lay down a starter AsciiDoc docs skeleton, snowball.yaml, justfile recipes and a GitHub release-attach workflow",
+		Short: "Lay down a starter AsciiDoc docs skeleton, snowball.yaml, justfile recipes and CI/release GitHub workflows",
+		Long: "Lay down a starter AsciiDoc docs skeleton, snowball.yaml, justfile recipes, a GitHub " +
+			"release-attach workflow (docs-release.yml), and, by default, a working ci.yml, " +
+			"release.yml and .goreleaser.yaml — use --no-release-workflow to skip that trio. " +
+			"--homebrew additionally appends a brews: (homebrew tap) block to .goreleaser.yaml; " +
+			"leave it off until a homebrew-tap repo and HOMEBREW_TAP_GITHUB_TOKEN secret exist.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root, err := os.Getwd()
 			if err != nil {
 				return err
 			}
 			res, err := scaffold.Docs(root, scaffold.Options{
-				ProjectName: projectName,
-				Force:       force,
-				DryRun:      dryRun,
-				NoWorkflow:  noWorkflow,
+				ProjectName:       projectName,
+				Force:             force,
+				DryRun:            dryRun,
+				NoWorkflow:        noWorkflow,
+				NoReleaseWorkflow: noReleaseWorkflow,
+				Homebrew:          homebrew,
 			})
 			for _, c := range res.Created {
 				fmt.Printf("  + %s\n", c)
@@ -305,7 +314,9 @@ func scaffoldCmd() *cobra.Command {
 	cmd.Flags().StringVar(&projectName, "project-name", "", "name substituted into the scaffolded docs (default: the current directory's name)")
 	cmd.Flags().BoolVar(&force, "force", false, "overwrite files that already exist")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "list what would be created/changed, changing nothing")
-	cmd.Flags().BoolVar(&noWorkflow, "no-workflow", false, "skip writing the GitHub release-attach workflow")
+	cmd.Flags().BoolVar(&noWorkflow, "no-workflow", false, "skip writing the GitHub release-attach workflow (docs-release.yml)")
+	cmd.Flags().BoolVar(&noReleaseWorkflow, "no-release-workflow", false, "skip writing ci.yml, release.yml and .goreleaser.yaml")
+	cmd.Flags().BoolVar(&homebrew, "homebrew", false, "append a brews: (homebrew tap) block to the scaffolded .goreleaser.yaml")
 	return cmd
 }
 

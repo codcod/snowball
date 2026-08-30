@@ -1,0 +1,66 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: gofmt
+        run: test -z "$(gofmt -l .)"
+      - name: vet
+        run: go vet ./...
+      - name: test
+        run: go test ./...
+      - name: build
+        run: go build -o demo ./cmd/demo
+
+  goreleaser-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          install-only: true
+      # Exit 2 = "valid, but deprecated properties": only reachable once a `brews:`
+      # tap block is added to .goreleaser.yaml (see --homebrew), so a plain scaffold
+      # should always exit 0 here — the tolerance is kept anyway so turning
+      # --homebrew on later never turns this job red.
+      - name: goreleaser check
+        run: goreleaser check || [ $? -eq 2 ]
+
+  ci-surface:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      # Pinned, never @latest: a floating lint version turns unrelated PRs red.
+      # setup-go above is required: without it `go install` still succeeds but its
+      # target GOPATH/bin never reaches $GITHUB_PATH, so the next step fails with
+      # "actionlint: command not found".
+      - name: install actionlint
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+      - name: actionlint
+        run: actionlint

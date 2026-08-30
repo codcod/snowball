@@ -22,8 +22,18 @@ type Options struct {
 	// DryRun reports what would happen and writes nothing at all — no
 	// directories, no justfile append, no config.
 	DryRun bool
-	// NoWorkflow skips writing the GitHub release-attach workflow.
+	// NoWorkflow skips writing the GitHub release-attach workflow (docs-release.yml).
 	NoWorkflow bool
+	// NoReleaseWorkflow skips ci.yml, release.yml and .goreleaser.yaml as one
+	// bundle — never a partial combination, since ci.yml's goreleaser-check job
+	// is written only together with the .goreleaser.yaml it validates.
+	NoReleaseWorkflow bool
+	// Homebrew appends a brews: (homebrew tap) block to the scaffolded
+	// .goreleaser.yaml. Opt-in, not opt-out: it assumes a homebrew-tap repo and
+	// a HOMEBREW_TAP_GITHUB_TOKEN secret already exist, which a brand-new
+	// adopter is unlikely to have yet. A no-op (with a note) if NoReleaseWorkflow
+	// is also set, since there is then no .goreleaser.yaml to append to.
+	Homebrew bool
 }
 
 // Result records what a run created, left in place, or wants the caller to
@@ -47,8 +57,10 @@ type scaffoldFile struct {
 }
 
 // Docs performs a scaffold run into root: the AsciiDoc docs skeleton, a
-// matching PDF theme, a generated snowball.yaml (via StarterConfig), and
-// (unless NoWorkflow) a GitHub release-attach workflow. Justfile recipes are
+// matching PDF theme, a generated snowball.yaml (via StarterConfig), (unless
+// NoWorkflow) a GitHub release-attach workflow, and (unless NoReleaseWorkflow)
+// the ci.yml/release.yml workflows plus a .goreleaser.yaml — the last
+// optionally carrying a homebrew tap block (Homebrew). Justfile recipes are
 // appended separately (see appendJustfileRecipes) since they never create a
 // justfile that does not already exist.
 func Docs(root string, opts Options) (Result, error) {
@@ -69,6 +81,12 @@ func Docs(root string, opts Options) (Result, error) {
 	if !opts.NoWorkflow {
 		files = append(files, scaffoldFile{"templates/github/workflows/docs-release.yml", workflowPath})
 	}
+	if !opts.NoReleaseWorkflow {
+		files = append(files,
+			scaffoldFile{"templates/github/workflows/ci.yml", ciWorkflowPath},
+			scaffoldFile{"templates/github/workflows/release.yml", releaseWorkflowPath},
+		)
+	}
 
 	for _, f := range files {
 		data, err := templatesFS.ReadFile(f.asset)
@@ -86,11 +104,54 @@ func Docs(root string, opts Options) (Result, error) {
 		return res, err
 	}
 
+	if opts.NoReleaseWorkflow {
+		if opts.Homebrew {
+			res.note("--homebrew had nothing to attach to: --no-release-workflow skips .goreleaser.yaml")
+		}
+	} else {
+		if err := writeGoreleaserConfig(root, name, opts, &res); err != nil {
+			return res, err
+		}
+	}
+
 	if err := appendJustfileRecipes(root, opts.DryRun, &res); err != nil {
 		return res, err
 	}
 
 	return res, nil
+}
+
+// writeGoreleaserConfig assembles and writes the scaffolded .goreleaser.yaml:
+// the base template, both tokens substituted, with the homebrew brews:
+// fragment appended when opts.Homebrew is set. Kept out of the files table
+// above because, unlike every other scaffoldFile, its content depends on an
+// option rather than being a fixed 1:1 asset-to-path mapping.
+func writeGoreleaserConfig(root, name string, opts Options, res *Result) error {
+	data, err := templatesFS.ReadFile("templates/goreleaser.yaml")
+	if err != nil {
+		return fmt.Errorf("read embedded templates/goreleaser.yaml: %w", err)
+	}
+
+	owner, ok := detectGitHubOwner(root)
+	if !ok {
+		owner = unknownGitHubOwner
+		res.note("could not determine a GitHub owner from `git remote get-url origin` — " +
+			goreleaserConfigPath + "'s release.github.owner (and the homebrew tap owner, if " +
+			"--homebrew) reads \"" + unknownGitHubOwner + "\"; fix it before the first tag")
+	}
+
+	if opts.Homebrew {
+		fragment, err := templatesFS.ReadFile("templates/goreleaser-brews.fragment.yaml")
+		if err != nil {
+			return fmt.Errorf("read embedded templates/goreleaser-brews.fragment.yaml: %w", err)
+		}
+		data = append(data, fragment...)
+	}
+
+	data = substitute(data, name)
+	data = substituteToken(data, githubOwnerToken, owner)
+
+	return writeScaffoldFile(root, goreleaserConfigPath, data, opts, res)
 }
 
 // writeScaffoldFile writes data to root/installed, honouring Force, DryRun and
