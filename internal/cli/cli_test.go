@@ -233,6 +233,44 @@ func TestDocsPromptPrintsPlaceholderGuidance(t *testing.T) {
 	}
 }
 
+// defect: a --dry-run preview used to print each per-file note double-spaced
+// and without the +/= prefixes the real run uses, so the preview did not
+// look like the run it previews.
+func TestScaffoldDryRunNotesUseTildePrefix(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	out := captureStdout(t, func() {
+		if _, err := runCmd(t, scaffoldCmd(), "--dry-run", "--project-name", "demo"); err != nil {
+			t.Fatalf("scaffold --dry-run: %v", err)
+		}
+	})
+	if !strings.Contains(out, "(dry run — nothing was written)") {
+		t.Errorf("scaffold --dry-run output = %q, want the one-line dry-run header", out)
+	}
+	if !strings.Contains(out, "  ~ ") {
+		t.Errorf("scaffold --dry-run output = %q, want ~-prefixed preview lines", out)
+	}
+	if strings.Contains(out, "(dry-run)") {
+		t.Errorf("scaffold --dry-run output = %q, want the redundant \"(dry-run)\" text stripped under the header", out)
+	}
+}
+
+// defect: scaffold's help text documented the release-workflow bundle but
+// left its two genuinely non-obvious guarantees — it never creates a
+// justfile, and --dry-run writes nothing — to the README alone.
+func TestScaffoldHelpMentionsJustfileAndDryRunGuarantees(t *testing.T) {
+	long := strings.ToLower(scaffoldCmd().Long)
+	if !strings.Contains(long, "justfile") {
+		t.Errorf("scaffold Long = %q, want it to mention justfile", long)
+	}
+	if !strings.Contains(long, "dry-run") {
+		t.Errorf("scaffold Long = %q, want it to mention --dry-run", long)
+	}
+	if !strings.Contains(long, "never") || !strings.Contains(long, "nothing") {
+		t.Errorf("scaffold Long = %q, want it to state both guarantees plainly (never/nothing)", long)
+	}
+}
+
 func TestVersionCommandPrintsVersion(t *testing.T) {
 	out := captureStdout(t, func() {
 		if _, err := runCmd(t, versionCmd("v1.2.3")); err != nil {

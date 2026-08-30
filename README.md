@@ -29,7 +29,8 @@ you. Pass `--homebrew` to additionally scaffold a `brews:` (homebrew tap) block 
 `homebrew-tap` repo and a `HOMEBREW_TAP_GITHUB_TOKEN` secret before the first tag). The GitHub
 owner in `.goreleaser.yaml` is read from the `origin` remote of the enclosing git repository
 (git searches upward from the current directory) when possible; without one, it's written as
-`TODO-owner` for you to fill in.
+`TODO-owner` for you to fill in. Unlike every other command, `scaffold` and `init` always write
+into the current directory — they never walk upward looking for an existing `snowball.yaml`.
 
 Existing docs tree:
 

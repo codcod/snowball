@@ -190,6 +190,11 @@ snowball reads `snowball.yaml` from the current directory, or by walking up
 through parent directories until it finds one. That means `cd docs &&
 snowball build` behaves the same as running from the repository root.
 
+`scaffold` and `init` are the exception: they always write into the current
+directory and never walk upward looking for an existing `snowball.yaml`.
+Scaffolding into a parent directory just because it happened to hold a
+config would be worse than requiring you to `cd` there first.
+
 A typical config looks like this:
 
 [source,yaml]

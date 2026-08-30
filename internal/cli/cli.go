@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -280,12 +281,15 @@ func scaffoldCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "scaffold",
-		Short: "Lay down a starter AsciiDoc docs skeleton, snowball.yaml, justfile recipes and CI/release GitHub workflows",
+		Short: "Lay down a starter docs skeleton, config and CI/release workflows",
 		Long: "Lay down a starter AsciiDoc docs skeleton, snowball.yaml, justfile recipes, a GitHub " +
 			"release-attach workflow (docs-release.yml), and, by default, a working ci.yml, " +
 			"release.yml and .goreleaser.yaml — use --no-release-workflow to skip that trio. " +
 			"--homebrew additionally appends a brews: (homebrew tap) block to .goreleaser.yaml; " +
-			"leave it off until a homebrew-tap repo and HOMEBREW_TAP_GITHUB_TOKEN secret exist.",
+			"leave it off until a homebrew-tap repo and HOMEBREW_TAP_GITHUB_TOKEN secret exist. " +
+			"scaffold never creates a justfile — it only appends recipes to one that already " +
+			"exists. --dry-run writes nothing at all: no directories, no config, no justfile " +
+			"changes, nothing.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root, err := os.Getwd()
 			if err != nil {
@@ -305,7 +309,21 @@ func scaffoldCmd() *cobra.Command {
 			for _, s := range res.Skipped {
 				fmt.Printf("  = %s\n", s)
 			}
+			var previews, notes []string
 			for _, n := range res.Notes {
+				if strings.Contains(n, "(dry-run) would ") {
+					previews = append(previews, strings.Replace(n, "(dry-run) ", "", 1))
+				} else {
+					notes = append(notes, n)
+				}
+			}
+			if len(previews) > 0 {
+				fmt.Println("\n(dry run — nothing was written)")
+				for _, p := range previews {
+					fmt.Printf("  ~ %s\n", p)
+				}
+			}
+			for _, n := range notes {
 				fmt.Printf("\n%s\n", n)
 			}
 			return err
