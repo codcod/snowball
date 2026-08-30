@@ -49,10 +49,15 @@ const (
 	fallbackProject      = "project"     // used when a sanitised project name would be empty
 )
 
-// githubRemoteOwner matches an `origin` remote URL's owner segment for both the
-// SSH (`git@github.com:owner/repo.git`) and HTTPS (`https://github.com/owner/repo`)
-// forms, with or without a trailing `.git`.
-var githubRemoteOwner = regexp.MustCompile(`github\.com[:/]([^/]+)/[^/]+?(\.git)?$`)
+// githubRemoteOwner matches an `origin` remote URL's owner segment for the SCP-like
+// SSH (`git@github.com:owner/repo.git`), URI-style SSH (`ssh://git@github.com/owner/repo.git`)
+// and HTTP(S) (`https://github.com/owner/repo`) forms, with or without a trailing `.git`. The
+// `^` anchor pins the scheme (or `git@`) and "github.com" to the very start of the string —
+// deliberately, so a host that merely ends in or contains "github.com"
+// (`mygithub.com`, `notgithub.com`, `gitlab.com/x/github.com/...`) can never match, and a
+// GitHub Enterprise host (`github.example.com`) keeps resolving to ok=false rather than a
+// guessed owner.
+var githubRemoteOwner = regexp.MustCompile(`^(?:https?://|ssh://(?:git@)?|git@)github\.com[:/]([^/]+)/[^/]+?(?:\.git)?$`)
 
 // disallowedInProjectName matches any run of characters that may not survive
 // into a filesystem path segment or a plain (unquoted) YAML scalar. A
@@ -199,4 +204,22 @@ func detectGitHubOwner(root string) (owner string, ok bool) {
 		return "", false
 	}
 	return m[1], true
+}
+
+// gitToplevel best-effort resolves the top-level directory of the git
+// repository that governs root — the same repository detectGitHubOwner's
+// `git -C root` invocation would consult, since git resolves both by
+// searching upward from root. ok=false when git is not installed or root is
+// not inside a repository at all; same not-installed handling as
+// detectGitHubOwner.
+func gitToplevel(root string) (toplevel string, ok bool) {
+	if _, err := exec.LookPath("git"); err != nil {
+		return "", false
+	}
+	cmd := exec.Command("git", "-C", root, "rev-parse", "--show-toplevel")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", false
+	}
+	return strings.TrimSpace(string(out)), true
 }

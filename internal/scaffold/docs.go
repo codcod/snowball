@@ -25,8 +25,12 @@ type Options struct {
 	// NoWorkflow skips writing the GitHub release-attach workflow (docs-release.yml).
 	NoWorkflow bool
 	// NoReleaseWorkflow skips ci.yml, release.yml and .goreleaser.yaml as one
-	// bundle — never a partial combination, since ci.yml's goreleaser-check job
-	// is written only together with the .goreleaser.yaml it validates.
+	// bundle. The guarantee this preserves is an end-state property, not a
+	// per-run one: a goreleaser-check job in ci.yml never exists without a
+	// .goreleaser.yaml for it to validate. A single run can still write ci.yml
+	// while leaving a pre-existing .goreleaser.yaml untouched (exists-skip) —
+	// the invariant holds because that file is already there, not because
+	// this option enforces all-or-nothing within one invocation.
 	NoReleaseWorkflow bool
 	// Homebrew appends a brews: (homebrew tap) block to the scaffolded
 	// .goreleaser.yaml. Opt-in, not opt-out: it assumes a homebrew-tap repo and
@@ -143,8 +147,9 @@ const (
 // fragment appended when opts.Homebrew is set. Kept out of the files table
 // above because, unlike every other scaffoldFile, its content depends on an
 // option rather than being a fixed 1:1 asset-to-path mapping. When
-// detectGitHubOwner fails, whether it notes the placeholder — and in what
-// tense — depends on writeScaffoldFile's writeOutcome: see the switch below.
+// detectGitHubOwner fails, or resolves an owner from a repository other than
+// root itself, whether it notes that — and in what tense — depends on
+// writeScaffoldFile's writeOutcome: see the switch below.
 func writeGoreleaserConfig(root, name string, opts Options, res *Result) error {
 	data, err := templatesFS.ReadFile("templates/goreleaser.yaml")
 	if err != nil {
@@ -154,6 +159,27 @@ func writeGoreleaserConfig(root, name string, opts Options, res *Result) error {
 	owner, ok := detectGitHubOwner(root)
 	if !ok {
 		owner = unknownGitHubOwner
+	}
+
+	// crossRepo is only meaningful once an owner was actually resolved: git's
+	// own upward search (mirrored by gitToplevel) means the repository that
+	// answered may not be root itself — e.g. root is a plain subdirectory of
+	// an unrelated checkout. Both sides go through EvalSymlinks so a
+	// symlinked temp dir (e.g. macOS's /tmp -> /private/tmp) never produces a
+	// false positive; a resolution error is treated as "not cross-repo" —
+	// best-effort, same spirit as the rest of this function.
+	var crossRepo bool
+	var toplevel string
+	if ok {
+		if top, topOK := gitToplevel(root); topOK {
+			absRoot, errRoot := filepath.Abs(root)
+			resolvedRoot, errResolveRoot := filepath.EvalSymlinks(absRoot)
+			resolvedTop, errResolveTop := filepath.EvalSymlinks(top)
+			if errRoot == nil && errResolveRoot == nil && errResolveTop == nil && resolvedRoot != resolvedTop {
+				crossRepo = true
+				toplevel = top
+			}
+		}
 	}
 
 	if opts.Homebrew {
@@ -172,26 +198,47 @@ func writeGoreleaserConfig(root, name string, opts Options, res *Result) error {
 		return err
 	}
 
-	// The placeholder owner is only worth narrating against what this run
-	// actually did: a real write means the file on disk now reads it; a
-	// dry-run preview of a create/overwrite means it *would*, once run for
-	// real; a skipped existing file was never examined, so nothing here says
-	// anything about its current, possibly-already-correct, contents.
-	if ok {
+	if opts.Homebrew && outcome == writeOutcomeSkipped {
+		res.note("--homebrew had nothing to attach to: " + goreleaserConfigPath +
+			" already exists — pass --force to append the brews: block")
+	}
+
+	// Both the placeholder owner and a cross-repository owner are only worth
+	// narrating against what this run actually did: a real write means the
+	// file on disk now reads it; a dry-run preview of a create/overwrite
+	// means it *would*, once run for real; a skipped existing file was never
+	// examined, so nothing here says anything about its current,
+	// possibly-already-correct, contents. unknownOwner (!ok) and crossRepo
+	// are mutually exclusive, since crossRepo is only computed when ok.
+	if !ok {
+		switch outcome {
+		case writeOutcomeWritten:
+			res.note("could not determine a GitHub owner from `git remote get-url origin` — " +
+				goreleaserConfigPath + "'s release.github.owner (and the homebrew tap owner, if " +
+				"--homebrew) reads \"" + unknownGitHubOwner + "\"; fix it before the first tag")
+		case writeOutcomeDryRun:
+			res.note("could not determine a GitHub owner from `git remote get-url origin` — " +
+				"a scaffolded " + goreleaserConfigPath + "'s release.github.owner (and the homebrew " +
+				"tap owner, if --homebrew) would read \"" + unknownGitHubOwner +
+				"\"; fix it before the first tag")
+		case writeOutcomeSkipped:
+			// nothing to say — the existing file's owner is untouched.
+		}
 		return nil
 	}
-	switch outcome {
-	case writeOutcomeWritten:
-		res.note("could not determine a GitHub owner from `git remote get-url origin` — " +
-			goreleaserConfigPath + "'s release.github.owner (and the homebrew tap owner, if " +
-			"--homebrew) reads \"" + unknownGitHubOwner + "\"; fix it before the first tag")
-	case writeOutcomeDryRun:
-		res.note("could not determine a GitHub owner from `git remote get-url origin` — " +
-			"a scaffolded " + goreleaserConfigPath + "'s release.github.owner (and the homebrew " +
-			"tap owner, if --homebrew) would read \"" + unknownGitHubOwner +
-			"\"; fix it before the first tag")
-	case writeOutcomeSkipped:
-		// nothing to say — the existing file's owner is untouched.
+	if crossRepo {
+		switch outcome {
+		case writeOutcomeWritten:
+			res.note("owner \"" + owner + "\" resolved from the enclosing repository at " +
+				toplevel + ", not the scaffold root " + root + " — verify it matches before " +
+				"the first tag")
+		case writeOutcomeDryRun:
+			res.note("owner \"" + owner + "\" would resolve from the enclosing repository at " +
+				toplevel + ", not the scaffold root " + root + " — verify it matches before " +
+				"the first tag")
+		case writeOutcomeSkipped:
+			// nothing to say — the existing file's owner is untouched.
+		}
 	}
 	return nil
 }
