@@ -245,8 +245,8 @@ func TestNoForeignProductNameInScaffoldOutput(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if strings.Contains(string(data), "ai-sdlc") {
-			t.Errorf("%s contains a foreign product name (ai-sdlc)", path)
+		if strings.Contains(string(data), "ai-sdlc") { // leakguard:allow
+			t.Errorf("%s contains a foreign product name (ai-sdlc)", path) // leakguard:allow
 		}
 		return nil
 	}); err != nil {
@@ -255,27 +255,71 @@ func TestNoForeignProductNameInScaffoldOutput(t *testing.T) {
 	_ = res
 }
 
-// TestNoForeignProductNameAnywhereInRepo widens the invariant above: a
-// scaffold-output-only scan can stay green while a foreign product's own
-// name survives elsewhere in this repository's own source, including a
-// package doc comment. This test scans the whole tree's source/doc files,
-// not only what one command happens to generate.
-func TestNoForeignProductNameAnywhereInRepo(t *testing.T) {
-	root := repoRoot(t)
+// leakGuardExempt marks a line in this file as legitimately naming a
+// forbidden term — the vocabulary table below, and any diagnostic built from
+// it — so the line-wise scan in scanForLeaks does not trip on itself while
+// still catching a real leak appended anywhere else in this file.
+const leakGuardExempt = "// leakguard:allow"
 
-	// This file's own diagnostic strings ("contains a foreign product name
-	// (ai-sdlc)", directly above and in this doc comment) name the term to
-	// talk about it, not to ship it, so this test excludes its own source
-	// file from the scan rather than tripping on itself.
-	selfPath, err := filepath.Abs("scaffold_test.go")
-	if err != nil {
-		t.Fatal(err)
+// forbiddenTerm pairs a human label (used in failure messages) with the
+// pattern it matches. Every line below carries leakGuardExempt because the
+// label text itself names the forbidden term it describes.
+type forbiddenTerm struct {
+	label string
+	re    *regexp.Regexp
+}
+
+// forbiddenVocabulary is deliberately narrower than every leak this
+// workspace's conventions forbid: it covers only the axes a mechanical scan
+// can enforce without judgement — workspace names, ticket-tracking paths, and
+// ticket ids of any registered prefix (never exempt, per the workspace's own
+// child conventions doc — "never in shipped code, help text, README, or
+// CHANGELOG prose"). Sibling product names (rick/morty/summer) are
+// deliberately absent: that same doc forbids them "unless it is a genuine
+// product fact," a call this scan cannot make, so they stay a manual-review
+// concern. A bare "../" rule is absent too — it would false-positive on
+// legitimate relative paths already in this repo's own tests (see
+// TestScaffoldSurvivesYAMLUnsafeProjectName and config_test.go) — the actual
+// danger, a path escaping into the workspace, is already caught by the two
+// path-fragment entries below without it.
+var forbiddenVocabulary = []forbiddenTerm{ // leakguard:allow
+	{"foreign product name (ai-sdlc)", regexp.MustCompile(`ai-sdlc`)},               // leakguard:allow
+	{"workspace name (unity)", regexp.MustCompile(`(?i)\bunity\b`)},                 // leakguard:allow
+	{"workspace name (translator)", regexp.MustCompile(`(?i)\btranslator\b`)},       // leakguard:allow
+	{"ticket-tracking path (tickets/)", regexp.MustCompile(`(?i)tickets/`)},         // leakguard:allow
+	{"ticket-tracking path (development/)", regexp.MustCompile(`(?i)development/`)}, // leakguard:allow
+	{"ticket-tracking path (BOARD.md)", regexp.MustCompile(`(?i)board\.md`)},        // leakguard:allow
+	{"ticket id", regexp.MustCompile(`(?i)\b(?:SNOW|RICK|MRTY|SUMR|T)-\d+\b`)},      // leakguard:allow
+}
+
+// leakFinding is one line in one file matching forbiddenVocabulary.
+type leakFinding struct {
+	path, text, label string
+	line              int
+}
+
+// isProbablyBinary reports whether data looks like a binary file (a NUL byte
+// in its first 8000 bytes) rather than text. This replaces an extension
+// allow-list as the leakage guard's file filter: an allow-list silently skips
+// every extensionless file (justfile, Gemfile, LICENSE) and any future one,
+// while a binary/text distinction closes that blind spot regardless of what
+// the file happens to be named.
+func isProbablyBinary(data []byte) bool {
+	n := len(data)
+	if n > 8000 {
+		n = 8000
 	}
+	return bytes.IndexByte(data[:n], 0) != -1
+}
 
-	extensions := map[string]bool{".go": true, ".md": true, ".yml": true, ".yaml": true, ".adoc": true}
-	skipDirs := map[string]bool{".git": true, "dist": true}
-
-	if err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+// scanForLeaks walks root and returns every line matching forbiddenVocabulary,
+// skipping directories named in skipDirs and files that look binary. When
+// selfPath is non-empty, lines in that one file carrying leakGuardExempt are
+// skipped too — a line-wise exclusion, not a whole-file one, so a real leak
+// appended anywhere else in that file still trips the scan.
+func scanForLeaks(root, selfPath string, skipDirs map[string]bool) ([]leakFinding, error) {
+	var findings []leakFinding
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -285,27 +329,130 @@ func TestNoForeignProductNameAnywhereInRepo(t *testing.T) {
 			}
 			return nil
 		}
-		if !extensions[filepath.Ext(path)] {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if isProbablyBinary(data) {
 			return nil
 		}
 		abs, err := filepath.Abs(path)
 		if err != nil {
 			return err
 		}
-		if abs == selfPath {
-			return nil
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if strings.Contains(string(data), "ai-sdlc") {
-			t.Errorf("%s contains a foreign product name (ai-sdlc) — this project's source must not "+
-				"name another product", path)
+		isSelf := selfPath != "" && abs == selfPath
+		for i, line := range strings.Split(string(data), "\n") {
+			if isSelf && strings.Contains(line, leakGuardExempt) {
+				continue
+			}
+			for _, term := range forbiddenVocabulary {
+				if term.re.MatchString(line) {
+					findings = append(findings, leakFinding{path, strings.TrimSpace(line), term.label, i + 1})
+				}
+			}
 		}
 		return nil
-	}); err != nil {
+	})
+	return findings, err
+}
+
+// TestNoWorkspaceLeakageAnywhereInRepo widens the invariant above: a
+// scaffold-output-only scan can stay green while a leak survives elsewhere in
+// this repository's own source, including a package doc comment. This test
+// scans the whole tree, not only what one command happens to generate.
+func TestNoWorkspaceLeakageAnywhereInRepo(t *testing.T) {
+	root := repoRoot(t)
+	selfPath, err := filepath.Abs("scaffold_test.go")
+	if err != nil {
 		t.Fatal(err)
+	}
+	findings, err := scanForLeaks(root, selfPath, map[string]bool{".git": true, "dist": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range findings {
+		t.Errorf("%s:%d: forbidden %s: %q", f.path, f.line, f.label, f.text)
+	}
+}
+
+// defect: an extension allow-list left extensionless files (justfile,
+// Gemfile, LICENSE) invisible to the leakage guard — demonstrated during
+// review by appending a foreign product name to this repo's own justfile
+// and finding the guard still reported clean.
+func TestScanForLeaksCatchesExtensionlessFiles(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "justfile"), []byte("# borrowed from ai-sdlc\n"), 0o644); err != nil { // leakguard:allow
+		t.Fatal(err)
+	}
+	findings, err := scanForLeaks(root, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("findings = %v, want exactly 1 (the justfile leak)", findings)
+	}
+}
+
+// defect: whole-file self-exclusion meant a genuine leak appended anywhere in
+// the guard's own source file also passed, since the file was skipped
+// entirely rather than only the lines that legitimately name the terms.
+func TestScanForLeaksSelfExclusionIsLineWise(t *testing.T) {
+	root := t.TempDir()
+	self := filepath.Join(root, "guard.go")
+	content := "// exempt line naming ai-sdlc " + leakGuardExempt + "\n" + // leakguard:allow
+		"var leaked = \"ai-sdlc\"\n" // leakguard:allow
+	if err := os.WriteFile(self, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	findings, err := scanForLeaks(root, self, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 || findings[0].line != 2 {
+		t.Fatalf("findings = %v, want exactly 1 finding on line 2 (the exempt line 1 must not trip)", findings)
+	}
+}
+
+// TestForbiddenVocabularyPatterns guards the vocabulary itself against both
+// false negatives (a real leak the patterns should catch) and false
+// positives (ordinary text the ticket-id and word-boundary patterns must not
+// mistake for a leak) — mirroring the reasoning already documented for the
+// narrower docs-prompt guard at internal/cli/cli_test.go's leakPatterns.
+func TestForbiddenVocabularyPatterns(t *testing.T) {
+	cases := []struct {
+		text      string
+		wantMatch bool
+	}{
+		{"see SNOW-42 for context", true},                      // leakguard:allow
+		{"see RICK-7 for context", true},                       // leakguard:allow
+		{"tracked as MRTY-3", true},                            // leakguard:allow
+		{"tracked as SUMR-9", true},                            // leakguard:allow
+		{"the legacy T-101 ticket", true},                      // leakguard:allow
+		{"a unity build", true},                                // leakguard:allow
+		{"the translator tool", true},                          // leakguard:allow
+		{"read tickets/BOARD.md", true},                        // leakguard:allow
+		{"see development/rick/conventions.md", true},          // leakguard:allow
+		{"Tickets/history moved to a new tracker", true},       // leakguard:allow
+		{"Development/staging split is documented here", true}, // leakguard:allow
+		{"see BOARD.md for status", true},                      // leakguard:allow
+		{"UTF-8 output", false},
+		{"EPUB-3 format", false},
+		{"ISO-8601 date", false},
+		{"community effort", false},
+		{"opportunity knocks", false},
+		{"a translation layer", false},
+	}
+	for _, c := range cases {
+		got := false
+		for _, term := range forbiddenVocabulary {
+			if term.re.MatchString(c.text) {
+				got = true
+				break
+			}
+		}
+		if got != c.wantMatch {
+			t.Errorf("forbiddenVocabulary match(%q) = %v, want %v", c.text, got, c.wantMatch)
+		}
 	}
 }
 
