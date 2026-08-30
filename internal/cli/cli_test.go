@@ -255,6 +255,46 @@ func TestScaffoldDryRunNotesUseTildePrefix(t *testing.T) {
 	}
 }
 
+// TestScaffoldNoReleaseWorkflowFlagSkipsTrio proves --no-release-workflow is
+// actually wired from the CLI into scaffold.Options.NoReleaseWorkflow, not
+// just exercised at the scaffold package level.
+func TestScaffoldNoReleaseWorkflowFlagSkipsTrio(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+
+	if _, err := runCmd(t, scaffoldCmd(), "--project-name", "demo", "--no-release-workflow"); err != nil {
+		t.Fatalf("scaffold --no-release-workflow: %v", err)
+	}
+	for _, f := range []string{
+		filepath.Join(".github", "workflows", "ci.yml"),
+		filepath.Join(".github", "workflows", "release.yml"),
+		".goreleaser.yaml",
+	} {
+		if _, err := os.Stat(filepath.Join(root, f)); !os.IsNotExist(err) {
+			t.Errorf("%s exists (err=%v), want --no-release-workflow to skip it", f, err)
+		}
+	}
+}
+
+// TestScaffoldHomebrewFlagAppendsBrewsBlock proves --homebrew is actually
+// wired from the CLI into scaffold.Options.Homebrew, not just exercised at
+// the scaffold package level.
+func TestScaffoldHomebrewFlagAppendsBrewsBlock(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+
+	if _, err := runCmd(t, scaffoldCmd(), "--project-name", "demo", "--homebrew"); err != nil {
+		t.Fatalf("scaffold --homebrew: %v", err)
+	}
+	gr, err := os.ReadFile(filepath.Join(root, ".goreleaser.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(gr), "brews:") {
+		t.Errorf(".goreleaser.yaml = %q, want a brews: block with --homebrew", gr)
+	}
+}
+
 // defect: scaffold's help text documented the release-workflow bundle but
 // left its two genuinely non-obvious guarantees — it never creates a
 // justfile, and --dry-run writes nothing — to the README alone.

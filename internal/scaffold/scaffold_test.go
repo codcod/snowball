@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -550,7 +551,10 @@ func TestDocsRerunWithoutForceSkipsExisting(t *testing.T) {
 	if len(res.Created) != 0 {
 		t.Errorf("Created = %v, want none on a re-run without --force", res.Created)
 	}
-	for _, f := range []string{attributesPath, bookMasterPath, chapterPath, "snowball.yaml", workflowPath} {
+	for _, f := range []string{
+		attributesPath, bookMasterPath, chapterPath, "snowball.yaml", workflowPath,
+		ciWorkflowPath, releaseWorkflowPath, goreleaserConfigPath,
+	} {
 		if !contains(res.Skipped, f) {
 			t.Errorf("Skipped = %v, want it to contain %q", res.Skipped, f)
 		}
@@ -771,6 +775,9 @@ func TestDocsDryRunWritesNothing(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, "snowball.yaml")); !os.IsNotExist(err) {
 		t.Errorf("snowball.yaml exists after --dry-run (err=%v), want no such file", err)
 	}
+	if _, err := os.Stat(filepath.Join(root, goreleaserConfigPath)); !os.IsNotExist(err) {
+		t.Errorf("%s exists after --dry-run (err=%v), want no such file", goreleaserConfigPath, err)
+	}
 	got, err := os.ReadFile(filepath.Join(root, "justfile"))
 	if err != nil {
 		t.Fatal(err)
@@ -982,7 +989,9 @@ func TestDocsNoHomebrewNoteWhenGoreleaserConfigExistsWithoutHomebrew(t *testing.
 // detection "succeeded", so no note fired at all.
 func TestDocsOwnerNoteWhenRepoIsAboveScaffoldRoot(t *testing.T) {
 	parent := t.TempDir()
-	runGitIfAvailable(t, parent, "https://github.com/someoneelse/unrelated.git")
+	if !runGitIfAvailable(t, parent, "https://github.com/someoneelse/unrelated.git") {
+		t.Skip("git not on PATH — owner detection needs a real repository")
+	}
 	root := filepath.Join(parent, "sub")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
@@ -1009,7 +1018,9 @@ func TestDocsOwnerNoteWhenRepoIsAboveScaffoldRoot(t *testing.T) {
 // own fixture (e.g. macOS's /tmp -> /private/tmp).
 func TestDocsNoOwnerNoteWhenRepoIsScaffoldRoot(t *testing.T) {
 	root := t.TempDir()
-	runGitIfAvailable(t, root, "https://github.com/someoneelse/unrelated.git")
+	if !runGitIfAvailable(t, root, "https://github.com/someoneelse/unrelated.git") {
+		t.Skip("git not on PATH — owner detection needs a real repository")
+	}
 	res, err := Docs(root, Options{ProjectName: "demo"})
 	if err != nil {
 		t.Fatalf("Docs: %v", err)
@@ -1019,17 +1030,27 @@ func TestDocsNoOwnerNoteWhenRepoIsScaffoldRoot(t *testing.T) {
 	}
 }
 
-// runGitIfAvailable best-effort configures a github.com origin remote so
-// detectGitHubOwner has something real to resolve; tests that call it accept
-// git's absence the same way detectGitHubOwner itself does; assertions that
-// depend on a resolved owner are skipped in that case.
-func runGitIfAvailable(t *testing.T, root, remoteURL string) {
+// setupGitOrigin inits a git repo at root with the given origin remote.
+// Callers decide whether git's absence should skip the whole test or just
+// the assertions that depend on a resolved owner — this helper never skips.
+func setupGitOrigin(t *testing.T, root, remoteURL string) {
 	t.Helper()
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not on PATH — needed to exercise the owner-detection path")
-	}
 	runGit(t, root, "init", "-q")
 	runGit(t, root, "remote", "add", "origin", remoteURL)
+}
+
+// runGitIfAvailable best-effort configures a github.com origin remote so
+// detectGitHubOwner has something real to resolve, returning false (without
+// skipping) when git is not on PATH. Callers whose assertions do not depend
+// on the resolved owner value ignore the return; callers whose whole point is
+// owner detection skip themselves when it is false.
+func runGitIfAvailable(t *testing.T, root, remoteURL string) bool {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		return false
+	}
+	setupGitOrigin(t, root, remoteURL)
+	return true
 }
 
 // requireActionlintAndGoreleaser skips the calling test when either tool is
@@ -1164,8 +1185,7 @@ func TestScaffoldedGoreleaserCanActuallyRelease(t *testing.T) {
 func newScaffoldedGoRepo(t *testing.T, name string) string {
 	t.Helper()
 	root := t.TempDir()
-	runGit(t, root, "init", "-q")
-	runGit(t, root, "remote", "add", "origin", "https://github.com/codcod/"+name+".git")
+	setupGitOrigin(t, root, "https://github.com/codcod/"+name+".git")
 
 	if err := os.WriteFile(filepath.Join(root, "go.mod"),
 		[]byte("module github.com/codcod/"+name+"\n\ngo 1.21\n"), 0o644); err != nil {
@@ -1225,7 +1245,8 @@ func TestScaffoldedArchiveShipsOnlyIntendedFiles(t *testing.T) {
 		t.Skip("tar not on PATH — nothing to inspect the archive with")
 	}
 
-	root := newScaffoldedGoRepo(t, "demo")
+	projectName := "demo"
+	root := newScaffoldedGoRepo(t, projectName)
 
 	// Files a real adopter plausibly has lying around, none of which belongs
 	// in a published release archive. LICENSE litter is included here (round
@@ -1282,7 +1303,7 @@ func TestScaffoldedArchiveShipsOnlyIntendedFiles(t *testing.T) {
 			t.Errorf("archive ships %q: a directory sharing an intended name's prefix must not be swept in", name)
 			continue
 		}
-		if intended[name] || name == "demo" {
+		if intended[name] || name == projectName {
 			continue
 		}
 		t.Errorf("archive ships an unintended file %q — the archive globs are too wide; "+
@@ -1290,7 +1311,7 @@ func TestScaffoldedArchiveShipsOnlyIntendedFiles(t *testing.T) {
 	}
 	// And the fix must not have gone so narrow that it ships nothing.
 	for want := range intended {
-		if !contains(shipped, want) {
+		if !slices.Contains(shipped, want) {
 			t.Errorf("archive is missing %q, which is present in the repo; contents: %v", want, shipped)
 		}
 	}
