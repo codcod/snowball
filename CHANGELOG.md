@@ -45,7 +45,7 @@ While the version is below `1.0.0`, breaking changes may land in a minor release
   `introduction.adoc` chapter and `docs/attributes.adoc`), a matching PDF theme
   (`docs/pdf-theme/snowball-theme.yml`), `snowball.yaml`, the `docs-check`/`docs-build`
   justfile recipes, and `.github/workflows/docs-release.yml`. This follows the same pattern
-  morty (MRTY-005) and summer (SUMR-003) adopted from snowball's `scaffold` output.
+  morty and summer adopted from snowball's `scaffold` output.
   `README.md` is trimmed to install/quick-start and now points at the manual for everything
   else.
 - `scaffold` now generates `.github/workflows/ci.yml`, `release.yml` and `.goreleaser.yaml` by
