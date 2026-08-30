@@ -287,6 +287,60 @@ func TestNoForeignProductNameAnywhereInRepo(t *testing.T) {
 	}
 }
 
+// --- detectGitHubOwner: best-effort owner resolution for .goreleaser.yaml ---
+
+func TestDetectGitHubOwnerTable(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH — detectGitHubOwner has nothing to consult")
+	}
+	cases := []struct {
+		name      string
+		remoteURL string // empty means "add no origin remote at all"
+		wantOwner string
+		wantOK    bool
+	}{
+		{"https with .git suffix", "https://github.com/codcod/demo.git", "codcod", true},
+		{"https without .git suffix", "https://github.com/codcod/demo", "codcod", true},
+		{"ssh with .git suffix", "git@github.com:codcod/demo.git", "codcod", true},
+		{"ssh without .git suffix", "git@github.com:codcod/demo", "codcod", true},
+		{"non-github remote", "https://gitlab.com/codcod/demo.git", "", false},
+		{"no origin remote", "", "", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			root := t.TempDir()
+			runGit(t, root, "init", "-q")
+			if c.remoteURL != "" {
+				runGit(t, root, "remote", "add", "origin", c.remoteURL)
+			}
+			owner, ok := detectGitHubOwner(root)
+			if ok != c.wantOK || owner != c.wantOwner {
+				t.Errorf("detectGitHubOwner(%q) = (%q, %v), want (%q, %v)",
+					c.remoteURL, owner, ok, c.wantOwner, c.wantOK)
+			}
+		})
+	}
+}
+
+func TestDetectGitHubOwnerNotAGitRepo(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH — detectGitHubOwner has nothing to consult")
+	}
+	root := t.TempDir() // no `git init` at all
+	if owner, ok := detectGitHubOwner(root); ok {
+		t.Errorf("detectGitHubOwner on a non-git directory = (%q, true), want ok=false", owner)
+	}
+}
+
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+}
+
 // --- Behavioural coverage ---
 
 func TestDocsDefaultsProjectNameToRootBasename(t *testing.T) {
@@ -532,6 +586,416 @@ func TestDocsDryRunWritesNothing(t *testing.T) {
 	if !contains(res.Notes, "would create") {
 		t.Errorf("Notes = %v, want a dry-run preview", res.Notes)
 	}
+}
+
+// --- ci.yml, release.yml, .goreleaser.yaml: the release scaffold bundle ---
+
+func TestDocsScaffoldsReleaseFilesByDefault(t *testing.T) {
+	root := t.TempDir()
+	runGitIfAvailable(t, root, "https://github.com/codcod/demo.git")
+	res, err := Docs(root, Options{ProjectName: "demo"})
+	if err != nil {
+		t.Fatalf("Docs: %v", err)
+	}
+	for _, f := range []string{ciWorkflowPath, releaseWorkflowPath, goreleaserConfigPath} {
+		if _, err := os.Stat(filepath.Join(root, f)); err != nil {
+			t.Errorf("%s not written by default: %v", f, err)
+		}
+		if !contains(res.Created, f) {
+			t.Errorf("Created = %v, want it to contain %q", res.Created, f)
+		}
+	}
+	gr, err := os.ReadFile(filepath.Join(root, goreleaserConfigPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(gr), projectNameToken) || strings.Contains(string(gr), githubOwnerToken) {
+		t.Errorf(".goreleaser.yaml = %q, want no unsubstituted tokens", gr)
+	}
+	if !strings.Contains(string(gr), "project_name: demo") {
+		t.Errorf(".goreleaser.yaml = %q, want project_name substituted", gr)
+	}
+	if strings.Contains(string(gr), "brews:") {
+		t.Errorf(".goreleaser.yaml = %q, want no brews: block without --homebrew", gr)
+	}
+}
+
+func TestDocsNoReleaseWorkflowSkipsAllThree(t *testing.T) {
+	root := t.TempDir()
+	res, err := Docs(root, Options{ProjectName: "demo", NoReleaseWorkflow: true})
+	if err != nil {
+		t.Fatalf("Docs: %v", err)
+	}
+	for _, f := range []string{ciWorkflowPath, releaseWorkflowPath, goreleaserConfigPath} {
+		if _, err := os.Stat(filepath.Join(root, f)); !os.IsNotExist(err) {
+			t.Errorf("%s exists (err=%v), want --no-release-workflow to skip it", f, err)
+		}
+		if contains(res.Created, f) {
+			t.Errorf("Created = %v, want it to not contain %q", res.Created, f)
+		}
+	}
+	// docs-release.yml (governed by the separate, pre-existing --no-workflow) is unaffected.
+	if _, err := os.Stat(filepath.Join(root, workflowPath)); err != nil {
+		t.Errorf("docs-release.yml missing (err=%v), --no-release-workflow must not touch --no-workflow's file", err)
+	}
+}
+
+func TestDocsHomebrewAppendsBrewsBlock(t *testing.T) {
+	root := t.TempDir()
+	runGitIfAvailable(t, root, "https://github.com/codcod/demo.git")
+	if _, err := Docs(root, Options{ProjectName: "demo", Homebrew: true}); err != nil {
+		t.Fatalf("Docs: %v", err)
+	}
+	gr, err := os.ReadFile(filepath.Join(root, goreleaserConfigPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(gr), "brews:") {
+		t.Errorf(".goreleaser.yaml = %q, want a brews: block with --homebrew", gr)
+	}
+	if strings.Contains(string(gr), projectNameToken) || strings.Contains(string(gr), githubOwnerToken) {
+		t.Errorf(".goreleaser.yaml = %q, want no unsubstituted tokens in the brews block either", gr)
+	}
+}
+
+func TestDocsHomebrewWithoutReleaseWorkflowIsANoOp(t *testing.T) {
+	root := t.TempDir()
+	res, err := Docs(root, Options{ProjectName: "demo", NoReleaseWorkflow: true, Homebrew: true})
+	if err != nil {
+		t.Fatalf("Docs: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, goreleaserConfigPath)); !os.IsNotExist(err) {
+		t.Errorf(".goreleaser.yaml exists (err=%v), want --no-release-workflow to still win", err)
+	}
+	if !contains(res.Notes, "--homebrew had nothing to attach to") {
+		t.Errorf("Notes = %v, want a note explaining --homebrew was a no-op", res.Notes)
+	}
+}
+
+func TestDocsUnknownGitHubOwnerFallsBackToPlaceholder(t *testing.T) {
+	root := t.TempDir() // no git remote at all
+	res, err := Docs(root, Options{ProjectName: "demo"})
+	if err != nil {
+		t.Fatalf("Docs: %v", err)
+	}
+	gr, err := os.ReadFile(filepath.Join(root, goreleaserConfigPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(gr), "owner: "+unknownGitHubOwner) {
+		t.Errorf(".goreleaser.yaml = %q, want the placeholder owner when no remote is configured", gr)
+	}
+	if !contains(res.Notes, unknownGitHubOwner) {
+		t.Errorf("Notes = %v, want a note about the placeholder owner", res.Notes)
+	}
+}
+
+// runGitIfAvailable best-effort configures a github.com origin remote so
+// detectGitHubOwner has something real to resolve; tests that call it accept
+// git's absence the same way detectGitHubOwner itself does; assertions that
+// depend on a resolved owner are skipped in that case.
+func runGitIfAvailable(t *testing.T, root, remoteURL string) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH — needed to exercise the owner-detection path")
+	}
+	runGit(t, root, "init", "-q")
+	runGit(t, root, "remote", "add", "origin", remoteURL)
+}
+
+// requireActionlintAndGoreleaser skips the calling test when either tool is
+// missing from PATH — both are needed only to validate the scaffolded output
+// itself, not by the scaffold code, so their absence is a skip, not a
+// failure, mirroring the toolchain.Doctor()-gated tests below.
+func requireActionlintAndGoreleaser(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("actionlint"); err != nil {
+		t.Skip("actionlint not on PATH — skipping scaffolded-workflow validation")
+	}
+	if _, err := exec.LookPath("goreleaser"); err != nil {
+		t.Skip("goreleaser not on PATH — skipping scaffolded-config validation")
+	}
+}
+
+// TestScaffoldedWorkflowsValidate is the mechanical guard against the exact
+// defect this ticket exists to fix: a scaffolded ci.yml/release.yml that
+// *looks* right but was never actually run through the tools that validate
+// GitHub Actions workflows and goreleaser configs. Covers both the default
+// output and --homebrew, since goreleaser check's tolerated exit code differs
+// between them (2, "deprecated properties", only once brews: exists).
+func TestScaffoldedWorkflowsValidate(t *testing.T) {
+	requireActionlintAndGoreleaser(t)
+
+	t.Run("default", func(t *testing.T) {
+		root := t.TempDir()
+		runGitIfAvailable(t, root, "https://github.com/codcod/demo.git")
+		if _, err := Docs(root, Options{ProjectName: "demo"}); err != nil {
+			t.Fatalf("Docs: %v", err)
+		}
+		runActionlint(t, root, ciWorkflowPath, releaseWorkflowPath)
+		runGoreleaserCheck(t, root, false)
+	})
+
+	t.Run("homebrew", func(t *testing.T) {
+		root := t.TempDir()
+		runGitIfAvailable(t, root, "https://github.com/codcod/demo.git")
+		if _, err := Docs(root, Options{ProjectName: "demo", Homebrew: true}); err != nil {
+			t.Fatalf("Docs: %v", err)
+		}
+		runActionlint(t, root, ciWorkflowPath, releaseWorkflowPath)
+		runGoreleaserCheck(t, root, true)
+	})
+}
+
+// TestScaffoldedCIMatchesGolden guards the ci-surface actionlint incident this
+// whole feature exists to prevent (and any other unreviewed edit to the
+// generated ci.yml) by comparing the file snowball actually writes,
+// byte-for-byte, against a checked-in golden copy — rather than re-deriving
+// and enumerating every semantic property a workflow author could violate.
+//
+// Round 3 replaced a semantic ordering guard (step-position comparison via a
+// parsed YAML walk) with this. That guard was simultaneously evadable —
+// `GOBIN=` redirecting the install off $PATH, an `if:`-gated install, an
+// unguarded second job, and a bare `echo` standing in for the real invocation
+// all passed it — and false-positive on harmless edits, such as a comment
+// banner between steps or merging two steps into one idiomatic `run: |`
+// block. Both failure modes trace to the same cause: the guard was checking
+// an unbounded invariant ("this is a semantically valid, differently-shaped
+// workflow") when the one that actually matters is bounded and exact: "the
+// one ci.yml snowball generates is the file we intend it to be". A byte-diff
+// against a golden fixture covers that exactly, with no evasion enumeration
+// and no blind spot shaped like whatever the author thought to test for.
+//
+// A deliberate template edit updates testdata/golden/ci.yml in the same
+// commit; the *reviewer* then sees the semantic diff, which is where that
+// judgement belongs — not baked into a runtime assertion.
+func TestScaffoldedCIMatchesGolden(t *testing.T) {
+	root := t.TempDir()
+	if _, err := Docs(root, Options{ProjectName: "demo"}); err != nil {
+		t.Fatalf("Docs: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(root, ciWorkflowPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.ReadFile(filepath.Join("testdata", "golden", "ci.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Errorf("scaffolded ci.yml no longer matches testdata/golden/ci.yml.\n"+
+			"If this edit to templates/github/workflows/ci.yml is intentional, update "+
+			"the golden file in the same commit so the change is reviewed as the diff "+
+			"it actually is.\n\ngot:\n%s\n\nwant:\n%s", got, want)
+	}
+}
+
+// TestScaffoldedGoreleaserCanActuallyRelease is the guard whose absence let a
+// broken archives.files ship. `goreleaser check` validates the config's
+// *schema*, so it passes a config that cannot archive a real build and can
+// never fail for the reason this test exists. This runs an actual snapshot
+// release in a repo with no README.md and no CHANGELOG.md — the state
+// scaffold itself leaves behind, since it writes neither.
+//
+// `--skip=before` skips the generated `before.hooks` (`go mod tidy`, `go test
+// ./...`): they exercise the adopter's own project, not the scaffolded
+// config, and `go mod tidy` would make this test network-dependent.
+func TestScaffoldedGoreleaserCanActuallyRelease(t *testing.T) {
+	if _, err := exec.LookPath("goreleaser"); err != nil {
+		t.Skip("goreleaser not on PATH — skipping the real-release guard")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH — goreleaser needs a repo with a remote to resolve")
+	}
+
+	root := newScaffoldedGoRepo(t, "demo")
+
+	// The precondition that makes this test meaningful: scaffold created
+	// neither file, and the archive must not demand them.
+	for _, f := range []string{"README.md", "CHANGELOG.md"} {
+		if _, err := os.Stat(filepath.Join(root, f)); !os.IsNotExist(err) {
+			t.Fatalf("fixture is wrong: %s exists, so this test cannot catch the defect", f)
+		}
+	}
+
+	runSnapshotRelease(t, root)
+}
+
+// newScaffoldedGoRepo builds a minimal but real Go module in the layout the
+// scaffolded .goreleaser.yaml assumes (`./cmd/<name>`, root go.mod), inside a
+// git repo with a GitHub origin so owner detection and goreleaser both have
+// something to resolve, and scaffolds into it. Shared by the two archive
+// tests so the setup exists once.
+//
+// The go directive is deliberately an undemanding version rather than the
+// toolchain's current one: the fixture is `func main() {}` and needs nothing
+// recent, while a high pin makes the test fail red on an older toolchain (and,
+// under GOTOOLCHAIN=auto, download one — the network dependency `--skip=before`
+// exists to avoid).
+func newScaffoldedGoRepo(t *testing.T, name string) string {
+	t.Helper()
+	root := t.TempDir()
+	runGit(t, root, "init", "-q")
+	runGit(t, root, "remote", "add", "origin", "https://github.com/codcod/"+name+".git")
+
+	if err := os.WriteFile(filepath.Join(root, "go.mod"),
+		[]byte("module github.com/codcod/"+name+"\n\ngo 1.21\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "cmd", name), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "cmd", name, "main.go"),
+		[]byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Docs(root, Options{ProjectName: name}); err != nil {
+		t.Fatalf("Docs: %v", err)
+	}
+	return root
+}
+
+// runSnapshotRelease runs a real, unpublished goreleaser release in root and
+// fails the test on a non-zero exit. `--skip=before` omits the generated
+// before.hooks: they exercise the adopter's own project, not the scaffolded
+// config, and `go mod tidy` would make this network-dependent.
+func runSnapshotRelease(t *testing.T, root string) {
+	t.Helper()
+	cmd := exec.Command("goreleaser", "release", "--snapshot", "--clean", "--skip=before")
+	cmd.Dir = root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("the scaffolded .goreleaser.yaml cannot complete a snapshot release "+
+			"in a repo scaffold itself produced (or goreleaser rejected the invocation): "+
+			"%v\n%s", err, out)
+	}
+}
+
+// TestScaffoldedArchiveShipsOnlyIntendedFiles is the other half of the
+// archive question, and the half that was missed first time round. Fixing the
+// original defect (a literal `README.md` that fails the release when absent)
+// only asked "does it still release?" — never "what does the fix now let
+// through?". The answer was: `README*` also matches `README.md.bak`,
+// `README.old` and a `README/` directory, all of which then ship to end users.
+//
+// Round 3 (B6) added LICENSE litter and a `LICENSES/` directory: round 1
+// narrowed README/CHANGELOG to brace patterns but left `LICENSE*` as a bare
+// prefix glob one line below the comment condemning that exact form, and this
+// test's own whitelisting of "LICENSE" as intended — with no litter neighbour
+// to trip over — is why that went unnoticed until the next review round.
+//
+// So this asserts both directions: the intended files are included, and
+// plausible neighbouring litter is not.
+func TestScaffoldedArchiveShipsOnlyIntendedFiles(t *testing.T) {
+	if _, err := exec.LookPath("goreleaser"); err != nil {
+		t.Skip("goreleaser not on PATH — skipping the archive-contents guard")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH — goreleaser needs a repo with a remote to resolve")
+	}
+	if _, err := exec.LookPath("tar"); err != nil {
+		t.Skip("tar not on PATH — nothing to inspect the archive with")
+	}
+
+	root := newScaffoldedGoRepo(t, "demo")
+
+	// Files a real adopter plausibly has lying around, none of which belongs
+	// in a published release archive. LICENSE litter is included here (round
+	// 3, B6): round 1 whitelisted "LICENSE" as intended and never gave it a
+	// litter neighbour, so the archive glob's un-narrowed `LICENSE*` for that
+	// one name went unnoticed by this very test.
+	intended := map[string]bool{"README.md": true, "CHANGELOG.md": true, "LICENSE": true}
+	litter := []string{
+		"README.md.bak", "README.old", "CHANGELOG.md.orig", "READMEX.md",
+		"LICENSE-THIRD-PARTY.txt", "LICENSE.bak", "LICENSE.old",
+	}
+	for f := range intended {
+		if err := os.WriteFile(filepath.Join(root, f), []byte("x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, f := range litter {
+		if err := os.WriteFile(filepath.Join(root, f), []byte("x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Directories whose names share a prefix — plausible docs/legal layouts.
+	for _, dir := range []struct{ name, file string }{
+		{"README", "notes.txt"},
+		{"LICENSES", "mit.txt"},
+	} {
+		if err := os.MkdirAll(filepath.Join(root, dir.name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, dir.name, dir.file), []byte("x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	runSnapshotRelease(t, root)
+
+	matches, err := filepath.Glob(filepath.Join(root, "dist", "*_linux_amd64.tar.gz"))
+	if err != nil || len(matches) == 0 {
+		t.Fatalf("no linux/amd64 archive produced (err=%v)", err)
+	}
+	out, err := exec.Command("tar", "-tzf", matches[0]).Output()
+	if err != nil {
+		t.Fatalf("tar -tzf %s: %v", matches[0], err)
+	}
+	var shipped []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line != "" {
+			shipped = append(shipped, line)
+		}
+	}
+
+	for _, name := range shipped {
+		if strings.HasPrefix(name, "README/") || strings.HasPrefix(name, "LICENSES/") {
+			t.Errorf("archive ships %q: a directory sharing an intended name's prefix must not be swept in", name)
+			continue
+		}
+		if intended[name] || name == "demo" {
+			continue
+		}
+		t.Errorf("archive ships an unintended file %q — the archive globs are too wide; "+
+			"full contents: %v", name, shipped)
+	}
+	// And the fix must not have gone so narrow that it ships nothing.
+	for want := range intended {
+		if !contains(shipped, want) {
+			t.Errorf("archive is missing %q, which is present in the repo; contents: %v", want, shipped)
+		}
+	}
+}
+
+func runActionlint(t *testing.T, root string, workflows ...string) {
+	t.Helper()
+	args := make([]string, len(workflows))
+	for i, w := range workflows {
+		args[i] = filepath.Join(root, w)
+	}
+	cmd := exec.Command("actionlint", args...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Errorf("actionlint %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+}
+
+// runGoreleaserCheck runs `goreleaser check` against root's .goreleaser.yaml.
+// Exit code 2 ("valid, but uses deprecated properties") is tolerated only
+// once withBrews is true — that is the only scaffolded construct expected to
+// trigger it; a plain scaffold should exit 0.
+func runGoreleaserCheck(t *testing.T, root string, withBrews bool) {
+	t.Helper()
+	cmd := exec.Command("goreleaser", "check")
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		return
+	}
+	exitErr, ok := err.(*exec.ExitError)
+	if ok && withBrews && exitErr.ExitCode() == 2 {
+		return
+	}
+	t.Errorf("goreleaser check (withBrews=%v): %v\n%s", withBrews, err, out)
 }
 
 // --- Tier 2: end-to-end, skipped when the toolchain is not present ---

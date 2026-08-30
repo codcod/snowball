@@ -21,6 +21,16 @@ snowball build
 snowball docs-prompt |pi -p  # supplement initial docs content 
 ```
 
+By default, `scaffold` also writes `.github/workflows/ci.yml`, `release.yml` and
+`.goreleaser.yaml` — cross-compiled builds, `actionlint`/`goreleaser check` validation, and a
+tag-triggered release job. These assume a **Go** project laid out as `./cmd/<project-name>`
+with a `go.mod` at the repo root; pass `--no-release-workflow` to skip the trio if that is not
+you. Pass `--homebrew` to additionally scaffold a `brews:` (homebrew tap) block (needs a
+`homebrew-tap` repo and a `HOMEBREW_TAP_GITHUB_TOKEN` secret before the first tag). The GitHub
+owner in `.goreleaser.yaml` is read from the `origin` remote of the enclosing git repository
+(git searches upward from the current directory) when possible; without one, it's written as
+`TODO-owner` for you to fill in.
+
 Existing docs tree:
 
 ```sh

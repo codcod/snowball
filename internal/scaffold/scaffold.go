@@ -10,6 +10,7 @@ package scaffold
 import (
 	"bytes"
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -21,17 +22,37 @@ import (
 // default template delimiters.
 const projectNameToken = "__PROJECT_NAME__"
 
+// githubOwnerToken is substituted, verbatim, for a GitHub owner/org login in
+// goreleaser.yaml and its optional brews fragment. Same plain-byte-substitution
+// rationale as projectNameToken.
+const githubOwnerToken = "__GITHUB_OWNER__"
+
+// unknownGitHubOwner is written in place of githubOwnerToken when
+// detectGitHubOwner cannot determine a real one. It is a syntactically valid,
+// harmless YAML string — goreleaser check does not verify that a GitHub
+// owner/repo actually exists — so it never fails validation; it only needs
+// fixing before the first real tag.
+const unknownGitHubOwner = "TODO-owner"
+
 // Layout paths, relative to the scaffold root. Declared once so the config
 // generator and the file writer can never disagree about where something lives.
 const (
-	bookMasterPath  = "docs/user-manual.adoc"
-	chapterPath     = "docs/user-manual/introduction.adoc"
-	attributesPath  = "docs/attributes.adoc"
-	themeDir        = "docs/pdf-theme"
-	workflowPath    = ".github/workflows/docs-release.yml"
-	defaultBookOut  = "user-manual" // suffix appended to the project name for `out:`
-	fallbackProject = "project"     // used when a sanitised project name would be empty
+	bookMasterPath       = "docs/user-manual.adoc"
+	chapterPath          = "docs/user-manual/introduction.adoc"
+	attributesPath       = "docs/attributes.adoc"
+	themeDir             = "docs/pdf-theme"
+	workflowPath         = ".github/workflows/docs-release.yml"
+	ciWorkflowPath       = ".github/workflows/ci.yml"
+	releaseWorkflowPath  = ".github/workflows/release.yml"
+	goreleaserConfigPath = ".goreleaser.yaml"
+	defaultBookOut       = "user-manual" // suffix appended to the project name for `out:`
+	fallbackProject      = "project"     // used when a sanitised project name would be empty
 )
+
+// githubRemoteOwner matches an `origin` remote URL's owner segment for both the
+// SSH (`git@github.com:owner/repo.git`) and HTTPS (`https://github.com/owner/repo`)
+// forms, with or without a trailing `.git`.
+var githubRemoteOwner = regexp.MustCompile(`github\.com[:/]([^/]+)/[^/]+?(\.git)?$`)
 
 // disallowedInProjectName matches any run of characters that may not survive
 // into a filesystem path segment or a plain (unquoted) YAML scalar. A
@@ -145,4 +166,36 @@ func StarterConfig(name string, withTheme bool) []byte {
 // substitute replaces every occurrence of projectNameToken with name.
 func substitute(data []byte, name string) []byte {
 	return bytes.ReplaceAll(data, []byte(projectNameToken), []byte(name))
+}
+
+// substituteToken replaces every occurrence of token with value. Shares
+// substitute's plain-byte-replacement rationale; kept as a separate, generic
+// helper rather than folding into substitute so a template that needs neither
+// token (or only one of the two) never pays for the other's substitution.
+func substituteToken(data []byte, token, value string) []byte {
+	return bytes.ReplaceAll(data, []byte(token), []byte(value))
+}
+
+// detectGitHubOwner best-effort resolves the GitHub owner/org login that
+// root's `origin` remote points at, for use in the scaffolded
+// .goreleaser.yaml's release.github.owner (and, if requested, its homebrew
+// tap owner). It never errors: git not being installed, no `origin` remote,
+// or a remote that isn't a recognisable github.com URL all report ok=false so
+// the caller can fall back to a placeholder instead — mirrors the
+// not-installed handling in justfileParses (docs.go), which treats "nothing
+// to ask" the same as "consulted and inconclusive" rather than as an error.
+func detectGitHubOwner(root string) (owner string, ok bool) {
+	if _, err := exec.LookPath("git"); err != nil {
+		return "", false
+	}
+	cmd := exec.Command("git", "-C", root, "remote", "get-url", "origin")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", false
+	}
+	m := githubRemoteOwner.FindStringSubmatch(strings.TrimSpace(string(out)))
+	if m == nil {
+		return "", false
+	}
+	return m[1], true
 }

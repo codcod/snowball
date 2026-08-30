@@ -48,6 +48,20 @@ While the version is below `1.0.0`, breaking changes may land in a minor release
   morty (MRTY-005) and summer (SUMR-003) adopted from snowball's `scaffold` output.
   `README.md` is trimmed to install/quick-start and now points at the manual for everything
   else.
+- `scaffold` now generates `.github/workflows/ci.yml`, `release.yml` and `.goreleaser.yaml` by
+  default, instead of leaving each adopter to hand-copy and re-type that YAML from scratch with
+  no shared source to fix once. The generated `ci-surface` job installs `actionlint` after
+  `actions/setup-go` — an ordering that has to be exact, because without `setup-go` the
+  `go install` still succeeds but its target `GOPATH/bin` never reaches `$GITHUB_PATH`, and the
+  next step dies with `actionlint: command not found`. Two new flags come with it.
+  `--no-release-workflow` skips all three new files as one bundle, so `ci.yml`'s
+  `goreleaser-check` job is never written without a `.goreleaser.yaml` for it to validate.
+  `--homebrew` (opt-in) additionally appends a `brews:` tap block, which assumes a
+  `homebrew-tap` repo and a `HOMEBREW_TAP_GITHUB_TOKEN` secret a brand-new adopter is unlikely
+  to have yet. `.goreleaser.yaml`'s GitHub owner is derived, best-effort, from `git remote
+  get-url origin`; without a parseable `origin`, it falls back to the placeholder
+  `TODO-owner` plus a printed note. The generated workflows assume a Go project laid out as
+  `./cmd/<project-name>` with a `go.mod` at the repo root.
 
 ## [0.3.0] - 2026-08-23
 

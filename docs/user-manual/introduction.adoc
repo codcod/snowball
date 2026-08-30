@@ -18,7 +18,9 @@ main commands are:
 
 * `snowball scaffold` — lay down a starter docs skeleton (a one-book AsciiDoc
   structure, a matching PDF theme and a `snowball.yaml`) in a repo that has
-  no docs yet.
+  no docs yet, plus a CI and release setup (`ci.yml`, `release.yml`,
+  `.goreleaser.yaml`) that assumes a Go project. Those three are written
+  unless you pass `--no-release-workflow`; nothing is auto-detected.
 * `snowball init` — write a starter `snowball.yaml` only, for a repo whose
   docs tree already exists.
 * `snowball setup` — install the pinned toolchain (asciidoctor gems via
@@ -88,7 +90,7 @@ snowball doctor
 snowball build
 ----
 
-`scaffold` writes:
+`scaffold` writes the docs tree:
 
 * `docs/user-manual.adoc`
 * `docs/user-manual/introduction.adoc`
@@ -99,6 +101,29 @@ snowball build
 It also appends `docs-check` and `docs-build` recipes to an existing
 `justfile`, and writes `.github/workflows/docs-release.yml` unless you pass
 `--no-workflow`.
+
+By default it writes the release surface too:
+
+* `.github/workflows/ci.yml` — build, test, `goreleaser check`, and an
+  `actionlint` pass over the repository's own workflows
+* `.github/workflows/release.yml` — a tag-triggered goreleaser release
+* `.goreleaser.yaml` — cross-compiled binaries, archives and checksums
+
+These three assume a *Go* project laid out as `./cmd/<project-name>` with a
+`go.mod` at the repository root. Pass `--no-release-workflow` to skip all
+three if that does not describe your repository — they are skipped as one
+bundle, so `ci.yml` is never written without the `.goreleaser.yaml` its
+`goreleaser-check` job validates.
+
+Pass `--homebrew` to additionally append a `brews:` (homebrew tap) block to
+`.goreleaser.yaml`. It is off by default because it assumes a `homebrew-tap`
+repository and a `HOMEBREW_TAP_GITHUB_TOKEN` secret that a new project is
+unlikely to have yet.
+
+The GitHub owner written into `.goreleaser.yaml` is read from the `origin`
+remote of the enclosing git repository. When that cannot be resolved — no
+remote, or one that does not point at GitHub — the owner is written as
+`TODO-owner` and `scaffold` says so; fix it before the first tag.
 
 Existing files are left untouched and reported. Use `--force` to overwrite
 them, or `--dry-run` to see what would change without writing anything.

@@ -1,0 +1,19 @@
+
+# TODO: publishing to a homebrew tap needs its own `homebrew-tap` repo under
+# __GITHUB_OWNER__ and a HOMEBREW_TAP_GITHUB_TOKEN repo secret (a PAT with `repo`
+# scope on that tap repo) before the first tag.
+#
+# `brews:` (not `homebrew_casks:`) is deliberate: `homebrew_casks:` is for GUI
+# apps/bundles, and a plain CLI binary formula belongs in `brews:`. `goreleaser
+# check` reporting a deprecation notice for `brews:` is expected and safe to
+# ignore (tolerated by the scaffolded ci.yml's goreleaser-check job).
+brews:
+  - name: __PROJECT_NAME__
+    repository:
+      owner: __GITHUB_OWNER__
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: "https://github.com/__GITHUB_OWNER__/__PROJECT_NAME__"
+    description: "TODO: one-line description of __PROJECT_NAME__"
+    install: |
+      bin.install "__PROJECT_NAME__"

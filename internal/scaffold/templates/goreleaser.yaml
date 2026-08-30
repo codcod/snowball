@@ -1,0 +1,80 @@
+# goreleaser config — cross-compiled binaries, archives, checksums, GitHub Release.
+# Docs: https://goreleaser.com
+# Validate with `goreleaser check`; build a local, unpublished snapshot with
+# `goreleaser release --snapshot --clean`.
+version: 2
+
+project_name: __PROJECT_NAME__
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - id: __PROJECT_NAME__
+    main: ./cmd/__PROJECT_NAME__
+    binary: __PROJECT_NAME__
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X main.Version={{ .Version }}
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+
+archives:
+  - id: __PROJECT_NAME__
+    formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    # Brace patterns, not literal paths and not bare prefixes.
+    #   - A literal `README.md` fails the whole release ("globbing failed for
+    #     pattern README.md: file does not exist") when absent, and scaffold
+    #     creates none of these files.
+    #   - A bare `README*` skips correctly when absent, but also sweeps in
+    #     `README.md.bak`, `README.old` and even a `README/` directory, which
+    #     then ship to end users inside every archive.
+    # A brace pattern keeps the skip-if-absent property and names only the
+    # extensions actually intended, including the common extensionless
+    # `LICENSE` via the empty brace alternative. Every entry MUST contain a
+    # glob meta-character (`{`, `*`, `?`, ...) — an extensionless addition
+    # such as `- CHANGELOG` is a literal path and hard-fails the release when
+    # absent, which is the original defect this list exists to avoid.
+    # Extend ONLY by adding a fully-named extension to an existing brace list
+    # (e.g. `README.{md,adoc,rst,txt,mdx}`) or a new brace-listed entry.
+    # Never add a bare name, widen to a bare `*`, or add a suffix wildcard
+    # such as `LICENSE.*` — that satisfies "contains a meta-character" while
+    # reopening the exact litter-sweep this list exists to prevent
+    # (`LICENSE.*` matches `LICENSE.bak`/`LICENSE.old` too).
+    files:
+      - README.{md,adoc,rst,txt}
+      - CHANGELOG.{md,adoc,rst,txt}
+      - LICENSE{,.md,.adoc,.rst,.txt}
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+# TODO: confirm __GITHUB_OWNER__/__PROJECT_NAME__ is this repo's actual GitHub
+# owner/name before the first tag. This was derived from `git remote get-url origin`
+# at scaffold time; if that remote wasn't set yet (or didn't point at GitHub), the
+# owner below reads "TODO-owner" instead and must be filled in by hand.
+release:
+  github:
+    owner: __GITHUB_OWNER__
+    name: __PROJECT_NAME__
+  draft: false
+  prerelease: auto
+  mode: replace
+  replace_existing_artifacts: true   # `mode: replace` alone only governs the release body/
+  # changelog; without this, a re-run's asset uploads still 422 on an already-published tag.
