@@ -140,11 +140,12 @@ func StarterConfig(name string, withTheme bool) []byte {
 		theme = fmt.Sprintf("theme: %s\n", themePath(name))
 	} else {
 		theme = fmt.Sprintf(
-			"# theme: %s   # optional; PDF only. The filename MUST end in\n"+
-				"# \"-theme.yml\": snowball derives the theme name by stripping \".yml\" then\n"+
-				"# \"-theme\", then asciidoctor-pdf reloads \"<dir>/<name>-theme.yml\". A theme\n"+
-				"# file that does not exist still renders a PDF (falling back to the\n"+
-				"# built-in default theme) but the command still exits non-zero.\n",
+			"# optional; PDF only. Uncomment and point at your own theme file — it must end in\n"+
+				"# \"-theme.yml\": snowball derives the theme name by stripping \".yml\" then \"-theme\",\n"+
+				"# then asciidoctor-pdf reloads \"<dir>/<name>-theme.yml\". A theme file that does not\n"+
+				"# exist still renders a PDF (falling back to the built-in default theme) but the\n"+
+				"# command still exits non-zero.\n"+
+				"# theme: %s\n",
 			themePath(name),
 		)
 	}

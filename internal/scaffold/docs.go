@@ -94,13 +94,13 @@ func Docs(root string, opts Options) (Result, error) {
 			return res, fmt.Errorf("read embedded %s: %w", f.asset, err)
 		}
 		data = substitute(data, name)
-		if err := writeScaffoldFile(root, f.installed, data, opts, &res); err != nil {
+		if _, err := writeScaffoldFile(root, f.installed, data, opts, &res); err != nil {
 			return res, err
 		}
 	}
 
 	cfg := StarterConfig(name, true)
-	if err := writeScaffoldFile(root, config.DefaultFile, cfg, opts, &res); err != nil {
+	if _, err := writeScaffoldFile(root, config.DefaultFile, cfg, opts, &res); err != nil {
 		return res, err
 	}
 
@@ -121,11 +121,30 @@ func Docs(root string, opts Options) (Result, error) {
 	return res, nil
 }
 
+// writeOutcome reports what writeScaffoldFile actually did, so a caller that
+// cares — currently only writeGoreleaserConfig — can tell a real write from a
+// dry-run preview of one, or from an existing file left untouched.
+type writeOutcome int
+
+const (
+	// writeOutcomeSkipped means an existing file was left untouched (no
+	// --force): nothing about this run's inputs reached it.
+	writeOutcomeSkipped writeOutcome = iota
+	// writeOutcomeDryRun means --dry-run reported what a create/overwrite
+	// would do, without writing anything.
+	writeOutcomeDryRun
+	// writeOutcomeWritten means the file was actually created or overwritten
+	// on disk this run.
+	writeOutcomeWritten
+)
+
 // writeGoreleaserConfig assembles and writes the scaffolded .goreleaser.yaml:
 // the base template, both tokens substituted, with the homebrew brews:
 // fragment appended when opts.Homebrew is set. Kept out of the files table
 // above because, unlike every other scaffoldFile, its content depends on an
-// option rather than being a fixed 1:1 asset-to-path mapping.
+// option rather than being a fixed 1:1 asset-to-path mapping. When
+// detectGitHubOwner fails, whether it notes the placeholder — and in what
+// tense — depends on writeScaffoldFile's writeOutcome: see the switch below.
 func writeGoreleaserConfig(root, name string, opts Options, res *Result) error {
 	data, err := templatesFS.ReadFile("templates/goreleaser.yaml")
 	if err != nil {
@@ -135,9 +154,6 @@ func writeGoreleaserConfig(root, name string, opts Options, res *Result) error {
 	owner, ok := detectGitHubOwner(root)
 	if !ok {
 		owner = unknownGitHubOwner
-		res.note("could not determine a GitHub owner from `git remote get-url origin` — " +
-			goreleaserConfigPath + "'s release.github.owner (and the homebrew tap owner, if " +
-			"--homebrew) reads \"" + unknownGitHubOwner + "\"; fix it before the first tag")
 	}
 
 	if opts.Homebrew {
@@ -151,36 +167,63 @@ func writeGoreleaserConfig(root, name string, opts Options, res *Result) error {
 	data = substitute(data, name)
 	data = substituteToken(data, githubOwnerToken, owner)
 
-	return writeScaffoldFile(root, goreleaserConfigPath, data, opts, res)
+	outcome, err := writeScaffoldFile(root, goreleaserConfigPath, data, opts, res)
+	if err != nil {
+		return err
+	}
+
+	// The placeholder owner is only worth narrating against what this run
+	// actually did: a real write means the file on disk now reads it; a
+	// dry-run preview of a create/overwrite means it *would*, once run for
+	// real; a skipped existing file was never examined, so nothing here says
+	// anything about its current, possibly-already-correct, contents.
+	if ok {
+		return nil
+	}
+	switch outcome {
+	case writeOutcomeWritten:
+		res.note("could not determine a GitHub owner from `git remote get-url origin` — " +
+			goreleaserConfigPath + "'s release.github.owner (and the homebrew tap owner, if " +
+			"--homebrew) reads \"" + unknownGitHubOwner + "\"; fix it before the first tag")
+	case writeOutcomeDryRun:
+		res.note("could not determine a GitHub owner from `git remote get-url origin` — " +
+			"a scaffolded " + goreleaserConfigPath + "'s release.github.owner (and the homebrew " +
+			"tap owner, if --homebrew) would read \"" + unknownGitHubOwner +
+			"\"; fix it before the first tag")
+	case writeOutcomeSkipped:
+		// nothing to say — the existing file's owner is untouched.
+	}
+	return nil
 }
 
 // writeScaffoldFile writes data to root/installed, honouring Force, DryRun and
 // the exists-skip default. DryRun never touches the filesystem, including
 // MkdirAll — a dry run that creates an empty directory is a dry run that lied.
-func writeScaffoldFile(root, installed string, data []byte, opts Options, res *Result) error {
+// It reports which of the three outcomes above it took.
+func writeScaffoldFile(root, installed string, data []byte, opts Options, res *Result) (writeOutcome, error) {
 	dst := filepath.Join(root, filepath.FromSlash(installed))
 	if _, err := os.Lstat(dst); err == nil {
 		if !opts.Force {
 			res.skipped(installed + " (exists — pass --force to overwrite)")
-			return nil
+			return writeOutcomeSkipped, nil
 		}
 		if opts.DryRun {
 			res.note(installed + " (dry-run) would overwrite")
-			return nil
+			return writeOutcomeDryRun, nil
 		}
 	} else if opts.DryRun {
 		res.note(installed + " (dry-run) would create")
-		return nil
+		return writeOutcomeDryRun, nil
 	}
 
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return err
+		return writeOutcomeWritten, err
 	}
 	if err := os.WriteFile(dst, data, 0o644); err != nil {
-		return err
+		return writeOutcomeWritten, err
 	}
 	res.created(installed)
-	return nil
+	return writeOutcomeWritten, nil
 }
 
 // justfileRecipe is one docs recipe appendJustfileRecipes may append.
@@ -198,7 +241,7 @@ var justfileRecipes = []justfileRecipe{
 	},
 	{
 		Name:    "docs-build",
-		Comment: "# Render the user manual to PDF + EPUB into dist/docs/ (never committed)",
+		Comment: "# Render the user manual to PDF + EPUB into dist/docs/",
 		Body:    "snowball build -o dist/docs",
 	},
 }

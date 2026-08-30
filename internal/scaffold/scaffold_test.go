@@ -160,6 +160,28 @@ func TestInitConfigHasNoDanglingReferences(t *testing.T) {
 	}
 }
 
+// defect: the commented-out `theme:` example used to trail its explanatory
+// prose off the end of the same line, so uncommenting just that line left a
+// sentence cut mid-clause instead of a bare `theme: <path>`.
+func TestInitConfigThemeExampleUncommentsCleanly(t *testing.T) {
+	cfg := string(StarterConfig("demo", false))
+	var exampleLine string
+	for _, line := range strings.Split(cfg, "\n") {
+		if strings.HasPrefix(line, "# theme: ") {
+			exampleLine = line
+			break
+		}
+	}
+	if exampleLine == "" {
+		t.Fatalf("init config = %q, want a commented-out \"# theme: \" example line", cfg)
+	}
+	uncommented := strings.TrimPrefix(exampleLine, "# ")
+	want := "theme: " + themePath("demo")
+	if uncommented != want {
+		t.Errorf("uncommenting %q gives %q, want %q", exampleLine, uncommented, want)
+	}
+}
+
 // defect 4: a chapter included with leveloffset=+1 must open one level below
 // where it renders, or the including document's own section-ordering check
 // (`snowball check`) fails on it.
@@ -540,6 +562,27 @@ func TestDocsJustfileAppendsMissingRecipesOnly(t *testing.T) {
 	}
 }
 
+// defect: the appended docs-build recipe's comment claimed dist/docs/ is
+// "never committed", an assertion about .gitignore state scaffold never
+// creates.
+func TestDocsJustfileCommentDoesNotClaimGitignoreState(t *testing.T) {
+	root := t.TempDir()
+	original := "default:\n\t@just --list\n"
+	if err := os.WriteFile(filepath.Join(root, "justfile"), []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Docs(root, Options{ProjectName: "demo"}); err != nil {
+		t.Fatalf("Docs: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "justfile"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(got), "committed") {
+		t.Errorf("justfile = %q, want the docs-build comment to not claim .gitignore state", got)
+	}
+}
+
 func TestDocsNoWorkflowSkipsWorkflow(t *testing.T) {
 	root := t.TempDir()
 	res, err := Docs(root, Options{ProjectName: "demo", NoWorkflow: true})
@@ -687,6 +730,52 @@ func TestDocsUnknownGitHubOwnerFallsBackToPlaceholder(t *testing.T) {
 	}
 	if !contains(res.Notes, unknownGitHubOwner) {
 		t.Errorf("Notes = %v, want a note about the placeholder owner", res.Notes)
+	}
+}
+
+// defect: the owner-detection note used to fire whenever detection failed,
+// regardless of whether .goreleaser.yaml was actually going to be written —
+// including under --dry-run, where the present-tense "reads" wording claimed
+// a state that did not exist yet.
+func TestDocsUnknownGitHubOwnerNoteIsProspectiveUnderDryRun(t *testing.T) {
+	root := t.TempDir() // no git remote, no pre-existing .goreleaser.yaml
+	res, err := Docs(root, Options{ProjectName: "demo", DryRun: true})
+	if err != nil {
+		t.Fatalf("Docs: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, goreleaserConfigPath)); !os.IsNotExist(err) {
+		t.Fatalf(".goreleaser.yaml exists after --dry-run (err=%v), want no such file", err)
+	}
+	if !contains(res.Notes, "would read \""+unknownGitHubOwner+"\"") {
+		t.Errorf("Notes = %v, want a prospective (\"would read\") note under --dry-run", res.Notes)
+	}
+	if contains(res.Notes, "reads \""+unknownGitHubOwner+"\"") {
+		t.Errorf("Notes = %v, want no present-tense \"reads\" note under --dry-run", res.Notes)
+	}
+}
+
+// defect: the same premature note also fired on a re-run without --force,
+// where the existing .goreleaser.yaml is left untouched and may already hold
+// a perfectly good owner.
+func TestDocsUnknownGitHubOwnerNoteSuppressedWhenSkippingExisting(t *testing.T) {
+	root := t.TempDir() // no git remote
+	existing := "release:\n  github:\n    owner: realowner\n    name: demo\n"
+	if err := os.WriteFile(filepath.Join(root, goreleaserConfigPath), []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Docs(root, Options{ProjectName: "demo"})
+	if err != nil {
+		t.Fatalf("Docs: %v", err)
+	}
+	gr, err := os.ReadFile(filepath.Join(root, goreleaserConfigPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gr) != existing {
+		t.Errorf(".goreleaser.yaml changed on a re-run without --force: got %q, want unchanged %q", gr, existing)
+	}
+	if contains(res.Notes, unknownGitHubOwner) {
+		t.Errorf("Notes = %v, want no owner note when the existing file was left untouched", res.Notes)
 	}
 }
 

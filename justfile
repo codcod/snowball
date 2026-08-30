@@ -40,7 +40,7 @@ clean:
 docs-check:
     snowball check
 
-# Render the user manual to PDF + EPUB into dist/docs/ (never committed)
+# Render the user manual to PDF + EPUB into dist/docs/
 docs-build:
     snowball build -o dist/docs
 
