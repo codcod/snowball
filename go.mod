@@ -1,11 +1,11 @@
 module github.com/codcod/snowball
 
-go 1.26
+go 1.26.0
 
 require (
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/spf13/cobra v1.10.2
-	golang.org/x/sync v0.22.0
+	golang.org/x/sync v0.23.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
